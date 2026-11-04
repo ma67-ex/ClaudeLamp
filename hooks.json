@@ -1,0 +1,39 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "AskUserQuestion",
+      "hooks": [
+        { "type": "command", "command": "(~/.claude/scripts/led.py red >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED red: question" }
+      ]
+    }
+  ],
+  "Notification": [
+    {
+      "matcher": "permission_prompt",
+      "hooks": [
+        { "type": "command", "command": "(~/.claude/scripts/led.py red >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED red: permission" }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        { "type": "command", "command": "(~/.claude/scripts/led.py green >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED green: done" }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        { "type": "command", "command": "(~/.claude/scripts/led.py restore >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED restore" }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "hooks": [
+        { "type": "command", "command": "(~/.claude/scripts/led.py unred >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED unred" }
+      ]
+    }
+  ]
+}
