@@ -325,6 +325,41 @@ class Api:
         save_cfg(self.cfg)
         return {"ok": True}
 
+    # Claude state effects (what the strip does for working / attention / done), stored in led-state.json
+    DEFAULT_EFFECTS = {
+        "working":   {"type": "colour", "rgb": "4b0082"},
+        "attention": {"type": "scene", "scene": 0x18, "speed": 100, "seconds": 300},
+        "done":      {"type": "scene", "scene": 0x19, "speed": 100, "seconds": 5},
+    }
+
+    def get_effects(self):
+        cfg = load_cfg()
+        eff = {k: {**v, **cfg.get("effects", {}).get(k, {})} for k, v in self.DEFAULT_EFFECTS.items()}
+        if "working" not in cfg.get("effects", {}):
+            eff["working"] = {"type": "colour", "rgb": cfg.get("idle", "4b0082")}
+        return eff
+
+    def set_effects(self, effects):
+        cfg = load_cfg()
+        clean = {}
+        for k in ("working", "attention", "done"):
+            e = effects.get(k) or {}
+            spec = {"type": e.get("type", "colour")}
+            if spec["type"] == "colour":
+                spec["rgb"] = str(e.get("rgb", "4b0082")).lstrip("#").lower()
+            elif spec["type"] == "scene":
+                spec["scene"] = int(e.get("scene", 0x18)); spec["speed"] = max(1, min(100, int(e.get("speed", 100))))
+            if e.get("bright"):
+                spec["bright"] = max(1, min(100, int(e["bright"])))
+            if k != "working":
+                spec["seconds"] = max(1, int(e.get("seconds", 300 if k == "attention" else 5)))
+            clean[k] = spec
+        cfg["effects"] = clean
+        if clean["working"]["type"] == "colour":
+            cfg["idle"] = clean["working"]["rgb"]
+        save_cfg(cfg)
+        return {"ok": True}
+
     def hook_test(self, what):
         """Run the Claude Code hook script so the user can see red / green / restore."""
         if not os.path.exists(LED_PY):

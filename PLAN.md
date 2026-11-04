@@ -186,3 +186,7 @@ Tested on hardware on 2026-11-04. The strip is single-zone: every LED shows the 
 - Payloads above about 40 bytes (15 colours, 8 chunks) made the controller drop the link and go off-air until power-cycled. Keep DIY colour lists to 8 or fewer.
 
 Segments need an addressable (RGBIC) strip. For those, `diy()`/`diy2()` with `rgb_index=True` and an `indices` list is the place to start.
+
+## 9. Per-state effects
+
+`~/.claude/led-state.json` carries an `effects` object with `working`, `attention` and `done`. Each is `{"type": "colour"|"scene"|"off", "rgb", "scene", "speed", "bright", "seconds"}`. `led.py` merges it over `DEFAULT_EFFECTS` and builds frames with `effect_frames()`; the app's Settings tab edits the same object through `get_effects` / `set_effects`. Old configs with only `idle` still work: `idle` becomes the working colour.

@@ -85,7 +85,34 @@ Claude Code hooks in `~/.claude/settings.json` run a small script on five events
 | Claude finishes with a question | red strobe |
 | Permission granted, Claude continues | purple |
 
-Change the idle colour in **Settings**, or with:
+### Make it yours
+
+Each state can be a colour, any of the 31 built-in scenes at a chosen speed, or off, with its own duration. Set it in **Settings** or edit `~/.claude/led-state.json`:
+
+```json
+{
+  "name": "P065_17F3",
+  "effects": {
+    "working":   { "type": "colour", "rgb": "4b0082" },
+    "attention": { "type": "scene",  "scene": 24, "speed": 100, "seconds": 300 },
+    "done":      { "type": "scene",  "scene": 25, "speed": 100, "seconds": 5 }
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `type` | `colour`, `scene` or `off` |
+| `rgb` | hex colour for `colour` |
+| `scene`, `speed` | scene id (see the Scenes tab, or `daybetter.SCENES`) and speed 1..100 |
+| `bright` | optional brightness 1..100 |
+| `seconds` | how long `attention` and `done` last before `working` returns |
+
+<div align="center">
+<img src="docs/images/settings.png" width="620" alt="Settings tab with the Claude state editor">
+</div>
+
+Quick change of the working colour from a terminal:
 
 ```bash
 ~/.claude/scripts/led.py idle RRGGBB

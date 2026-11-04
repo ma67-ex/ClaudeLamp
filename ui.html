@@ -120,9 +120,10 @@ button.b.acc{background:var(--c);color:#fff;box-shadow:0 0 24px color-mix(in srg
   <div class="row"><label>Power cut</label><select id="pon"><option value="0">Stay off</option><option value="1">Turn on</option><option value="2">Last state</option></select><button class="b" onclick="setPon()">Apply</button></div>
   <div class="row"><label>DIY RGB index</label><input type="checkbox" id="rgbidx"><span class="hint">tick if DIY scenes come out wrong</span></div></div>
  <div class="card"><h3>Claude Code status light</h3>
-  <div class="row"><label>Idle colour</label><input type="color" id="idle"><span class="hint">shown while Claude works and after the 5 s green</span></div>
-  <div class="row"><label>Try it</label><button class="b" onclick="hook('attention')">Needs you</button><button class="b" onclick="hook('done')">Done</button><button class="b" onclick="hook('working')">Working</button><span id="hookstat" class="hint"></span></div>
-  <div class="row"><label></label><button class="b acc" onclick="saveSettings()">Save settings</button></div></div>
+  <p class="hint" style="margin:0 0 10px">Pick what the strip does in each state. A colour, any built-in scene with its speed, or off. Attention and done end after their seconds and the working look returns.</p>
+  <div id="effects"></div>
+  <div class="row"><label></label><button class="b acc" onclick="saveEffects()">Save</button><span id="hookstat" class="hint"></span></div>
+  <p class="hint">Same thing by hand: edit <code>~/.claude/led-state.json</code>, key <code>effects</code>.</p></div>
  <div class="card"><h3>Device</h3><div class="kv" id="kv"></div></div><div class="err" id="e-settings"></div>
 </section>
 </main></div>
@@ -234,8 +235,26 @@ function buildWeek(n){const w=$('#w'+n);w.innerHTML='';DAYS.forEach((d,i)=>{cons
 function setWeek(n,mask){weeks[n]=mask&0x7f;[...$('#w'+n).children].forEach((b,i)=>b.classList.toggle('on',!!(weeks[n]&(1<<i))));}
 function saveTimer(n){const [h,m]=$('#t'+n).value.split(':').map(Number);call('e-timer',()=>api().timer(n,$('#t'+n+'en').classList.contains('on'),weeks[n],h,m));}
 function setPon(){call('e-settings',()=>api().power_on($('#pon').value));}
-function saveSettings(){call('e-settings',()=>api().set_settings($('#sname').value,$('#idle').value,$('#rgbidx').checked));}
-function hook(w){$('#hookstat').textContent='…';const lbl={attention:'needs you',done:'done',working:'working'}[w];$('#claude span').textContent='Claude · '+lbl;api().hook_test(w).then(r=>{$('#hookstat').textContent=r.ok?'sent':r.error;});}
+function saveSettings(){call('e-settings',()=>api().set_settings($('#sname').value,'#'+(effects.working.rgb||'4b0082'),$('#rgbidx').checked));}
+/* Claude state effects editor */
+let effects={}, sceneList=[];
+const STATES=[['working','Working','purple while Claude runs'],['attention','Needs you','question or permission'],['done','Done','turn finished']];
+function renderEffects(){const h=$('#effects');h.innerHTML='';STATES.forEach(([k,label,hint])=>{const e=effects[k]||{type:'colour',rgb:'4b0082'};const d=document.createElement('div');d.className='row';d.style.alignItems='flex-start';
+ d.innerHTML=`<label style="padding-top:8px">${label}<br><span class="hint">${hint}</span></label>
+ <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+  <div class="row" style="margin:0"><select data-k="${k}" data-f="type"><option value="colour">Colour</option><option value="scene">Scene</option><option value="off">Off</option></select>
+   <input type="color" data-k="${k}" data-f="rgb" value="#${e.rgb||'4b0082'}" style="width:40px;height:30px;border:1px solid var(--line);border-radius:8px;background:none;padding:0">
+   <select data-k="${k}" data-f="scene" style="max-width:190px">${sceneList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select>
+   <button class="b" onclick="hook('${k}')">Try</button></div>
+  <div class="row" style="margin:0"><span class="hint" style="min-width:52px">speed</span><input type="range" min="1" max="100" data-k="${k}" data-f="speed" value="${e.speed||100}" style="max-width:160px">
+   <span class="hint" style="min-width:60px">brightness</span><input type="range" min="1" max="100" data-k="${k}" data-f="bright" value="${e.bright||100}" style="max-width:160px">
+   ${k!=='working'?`<span class="hint">seconds</span><input type="text" data-k="${k}" data-f="seconds" value="${e.seconds||(k==='attention'?300:5)}" style="width:64px">`:''}</div></div>`;
+ h.appendChild(d);d.querySelector('[data-f=type]').value=e.type||'colour';if(e.scene!==undefined)d.querySelector('[data-f=scene]').value=e.scene;
+ const sync=()=>{const t=d.querySelector('[data-f=type]').value;d.querySelector('[data-f=rgb]').style.display=t==='colour'?'':'none';d.querySelector('[data-f=scene]').style.display=t==='scene'?'':'none';d.querySelector('[data-f=speed]').parentNode.style.display=t==='off'?'none':'';};
+ d.querySelector('[data-f=type]').onchange=sync;sync();});}
+function readEffects(){const out={};STATES.forEach(([k])=>{const g=f=>document.querySelector(`[data-k="${k}"][data-f="${f}"]`);const sp={type:g('type').value,rgb:g('rgb').value.slice(1),scene:+g('scene').value,speed:+g('speed').value};const b=+g('bright').value;if(b<100)sp.bright=b;if(k!=='working')sp.seconds=+g('seconds').value;out[k]=sp;});return out;}
+function saveEffects(){effects=readEffects();call('e-settings',()=>api().set_effects(effects)).then(()=>{$('#hookstat').textContent='saved';setTimeout(()=>$('#hookstat').textContent='',1500);});}
+function hook(w){effects=readEffects();api().set_effects(effects).then(()=>{$('#hookstat').textContent='…';const lbl={attention:'needs you',done:'done',working:'working'}[w];$('#claude span').textContent='Claude · '+lbl;api().hook_test(w).then(r=>{$('#hookstat').textContent=r.ok?'sent':r.error;});});}
 function applyState(s){setPower(s.on);$('#bright').value=$('#bright2').value=s.bright;$('#brightv').textContent=$('#bright2v').textContent=s.bright+'%';$('#speed').value=s.speed;$('#speedv').textContent=s.speed+'%';$('#sens').value=s.sensitivity;
  if(s.mode===1)setHexUI(s.rgb);else if(s.mode===0)setVis('static',['#ffe9c4'],'static');else if(s.label&&s.mode!==0xc2){setVis('scene',sceneColors(s.label),sceneKind(s.label),s.speed);}
  if(!s.on)setVis('off',[],'static');
@@ -244,5 +263,5 @@ function applyState(s){setPower(s.on);$('#bright').value=$('#bright2').value=s.b
  (s.timers||[]).forEach(t=>{const n=t.number;if(n!==1&&n!==2)return;$('#t'+n).value=String(t.hour).padStart(2,'0')+':'+String(t.minute).padStart(2,'0');$('#t'+n+'en').classList.toggle('on',t.enable);setWeek(n,t.week&0x80?0:t.week);});
  $('#kv').innerHTML=`<span>Mode</span><b>${s.label}</b><span>Brightness</span><b>${s.bright}%</b><span>Speed</span><b>${s.speed}%</b><span>Microphone</span><b>${s.device_mic?'yes':'no'}</b><span>State frame</span><b style="font-family:Menlo,monospace;font-size:11px">${s.raw}</b>`;}
 function refresh(){$('#status').textContent='reading…';api().get_state().then(r=>{if(r.ok)applyState(r.result);else $('#status').textContent=r.error;});}
-window.addEventListener('pywebviewready',()=>{buildWeek(1);buildWeek(2);renderSlots();api().scenes().then(buildScenes);api().get_settings().then(s=>{$('#sname').value=s.name;$('#idle').value='#'+s.idle;$('#rgbidx').checked=s.diy_rgb_index;});refresh();});
+window.addEventListener('pywebviewready',()=>{buildWeek(1);buildWeek(2);renderSlots();api().scenes().then(l=>{sceneList=l;buildScenes(l);api().get_effects().then(e=>{effects=e;renderEffects();});});api().get_settings().then(s=>{$('#sname').value=s.name;$('#rgbidx').checked=s.diy_rgb_index;});refresh();});
 </script></body></html>
