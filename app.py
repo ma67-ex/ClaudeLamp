@@ -123,7 +123,7 @@ class Api:
         return self._run(self._send([db.switch(True), db.brightness(100), db.scene(0x17), db.speed(100)]))
 
     def chaos(self, on):
-        """Host-driven disco: random colour every BLE write (about 15 per second)."""
+        """Host-driven disco: random colour every acknowledged BLE write (13.6 per second measured)."""
         if on:
             self._stop_chaos()
             self._chaos = asyncio.run_coroutine_threadsafe(self._chaos_loop(), self.loop)
@@ -143,7 +143,7 @@ class Api:
         await strip.send([db.switch(True), db.brightness(100)] + db.color(255, 0, 0))
         while True:
             r, g, b = random.choice([(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (0, 255, 255), (255, 0, 255), (255, 255, 255)])
-            await strip.send(db.pack(db.CMD_COLOR, r, g, b, 255))  # ponytail: one write per colour, ~60 ms each on this radio
+            await strip.send(db.pack(db.CMD_COLOR, r, g, b, 255), gap=0)  # one acknowledged write per colour
 
     # DIY
     def diy(self, colors, pattern, bright, spd):
@@ -229,7 +229,7 @@ button.b:hover{border-color:var(--acc)}button.b.on{background:var(--acc);border-
 </section>
 <section id="scenes">
  <div class="card"><div class="row"><label>Party</label><button class="b on" onclick="disco()">Ultimate Disco</button><button id="chaosb" class="b" onclick="chaos()">Chaos (random colours, host-driven)</button></div>
- <p class="hint">Ultimate Disco = firmware seven-colour strobe at max speed. Chaos streams a new random colour on every Bluetooth write, about 15 per second; stop it before using other controls.</p></div>
+ <p class="hint">Ultimate Disco = firmware seven-colour strobe at max speed. Chaos streams a new random colour on every Bluetooth write, about 13 per second measured; stop it before using other controls.</p></div>
  <div class="card"><div class="row"><label>Speed</label><input id="speed" type="range" min="1" max="100" value="50"><span id="speedv">50%</span></div>
  <div class="row"><label>Brightness</label><input id="bright2" type="range" min="1" max="100" value="100"><span id="bright2v">100%</span></div></div>
  <div class="card"><div class="grid" id="scenegrid"></div></div><div class="err" id="e-scenes"></div>

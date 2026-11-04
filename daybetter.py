@@ -282,15 +282,16 @@ class Strip:
                 pass
             self.client = None
 
-    async def send(self, frames: bytes | list[bytes]):
+    async def send(self, frames: bytes | list[bytes], gap: float = 0.08):
         async with self.lock:
-            await self._send(frames)
+            await self._send(frames, gap)
 
-    async def _send(self, frames):
+    async def _send(self, frames, gap=0.08):
         await self.connect()
         for fr in ([frames] if isinstance(frames, bytes) else frames):
             await self.client.write_gatt_char(WRITE_UUID, fr, response=True)
-            await asyncio.sleep(0.08)
+            if gap:
+                await asyncio.sleep(gap)
         self._touch()
 
     async def query(self, frame: bytes, reply_cmd: int, timeout: float = 2.0) -> bytes:
