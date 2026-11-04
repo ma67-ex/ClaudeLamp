@@ -6,9 +6,10 @@ This document is written for an AI agent or a developer who has never seen this 
 
 A Bluetooth Low Energy (BLE) LED strip in the user's room should:
 
-1. turn red when Claude Code asks the user a question (the `AskUserQuestion` tool) or waits for a permission prompt,
-2. turn green when Claude Code finishes a turn,
-3. return to the user's normal colour when the user sends the next message, or when a permission is granted and Claude continues working.
+1. show the idle colour (purple) while Claude Code works,
+2. strobe red at maximum speed when Claude asks a question (the `AskUserQuestion` tool, or a final message ending in "?") or waits for a permission prompt,
+3. turn green for 5 seconds when Claude finishes a turn, then return to idle,
+4. return to idle when the user sends the next message or grants a permission.
 
 ## 2. Hardware and environment
 
@@ -142,17 +143,19 @@ Add to `~/.claude/settings.json` under `"hooks"` (the installer merges `hooks.js
 
 | Event | Matcher | Command | Why |
 |---|---|---|---|
-| `PreToolUse` | `AskUserQuestion` | `led.py red` | Claude is about to ask a question |
-| `Notification` | `permission_prompt` | `led.py red` | Claude is waiting for a permission |
-| `Stop` | none | `led.py green` | Claude finished its turn |
-| `UserPromptSubmit` | none | `led.py restore` | user replied |
-| `PostToolUse` | none | `led.py unred` | a tool ran after a red state, meaning the permission was granted; go back to idle. No-op otherwise. |
+| `PreToolUse` | `AskUserQuestion` | `led.py attention` | Claude is about to ask a question |
+| `Notification` | `permission_prompt` | `led.py attention` | Claude is waiting for a permission |
+| `Stop` | none | `led.py done <<< "$(cat)"` | Claude finished. The hook JSON is read first so the script can open `transcript_path`; a last assistant message ending in "?" switches to attention |
+| `UserPromptSubmit` | none | `led.py working` | user replied |
+| `PostToolUse` | none | `led.py unattention` | a tool ran after an attention state, meaning the permission was granted; back to idle. No-op otherwise. |
+
+Attention = DayBetter scene `0x18` (Red Strobe) with speed 100, or ELK effect `0x96` (blink red) with speed 100. Done = static green, `sleep 5`, idle colour; the script holds the file lock during the 5 s so a `working` hook that fires meanwhile runs afterwards.
 
 ## 5b. The desktop app: `app.py` + `daybetter.py`
 
-`daybetter.py` holds the protocol (frame builders, state parser, scene table) and `Strip`, an async bleak client that disconnects after 3 s idle. `app.py` is a pywebview window (WKWebView, HTML inline) whose JavaScript calls Python methods on `Api`. BLE work runs on one asyncio loop in a background thread, serialised by an `asyncio.Lock`.
+`daybetter.py` holds the protocol (frame builders, state parser, scene table) and `Strip`, an async bleak client that disconnects after 3 s idle. Every public `Strip` call and the idle watcher take one `asyncio.Lock`, otherwise the watcher can drop the link in the middle of a write ("disconnected" errors). `app.py` is a pywebview window (WKWebView, HTML inline) whose JavaScript calls Python methods on `Api`. BLE work runs on one asyncio loop in a background thread, serialised by an `asyncio.Lock`.
 
-While the app runs it listens on the unix socket `~/.claude/ailamp.sock`. `led.py` checks for that socket first and, if present, sends `{"cmd", "rgb", "snapshot", "prev"}` as one JSON line and lets the app do the BLE work. That avoids two processes fighting over one peripheral and a deadlock that appeared when both also shared the file lock: the hook holds the lock while it waits for the app, so the app must never take it.
+While the app runs it listens on the unix socket `~/.claude/ailamp.sock`. `led.py` checks for that socket first and, if present, sends `{"frames": [hex, ...]}` as one JSON line; the app writes the frames on its own connection. All protocol logic stays in `led.py`. That avoids two processes fighting over one peripheral and a deadlock that appeared when both also shared the file lock: the hook holds the lock while it waits for the app, so the app must never take it.
 
 ## 6. Install steps for a fresh machine
 

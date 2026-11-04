@@ -43,7 +43,6 @@ class Api:
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
         self.strip = None
-        self.ble = None  # asyncio.Lock created on the loop; one BLE conversation at a time
         asyncio.run_coroutine_threadsafe(self._serve_hooks(), self.loop)
 
     async def _serve_hooks(self):
@@ -53,13 +52,11 @@ class Api:
         await asyncio.start_unix_server(self._hook_conn, SOCK)
 
     async def _hook_conn(self, reader, writer):
+        """led.py sends {"frames": [hex, ...]} as one line; we write them on our connection and answer {"ok": true}."""
         try:
             req = json.loads((await reader.readline()).decode())
-            state = None
-            strip = await self._strip()
-            async with self.ble:
-                await self._hook_apply(strip, req)
-            writer.write((json.dumps({"ok": True, "state": req.get("_state")}) + "\n").encode())
+            await (await self._strip()).send([bytes.fromhex(h) for h in req["frames"]])
+            writer.write((json.dumps({"ok": True}) + "\n").encode())
         except Exception as e:
             writer.write((json.dumps({"ok": False, "error": str(e)}) + "\n").encode())
         try:
@@ -68,24 +65,6 @@ class Api:
             pass
         writer.close()
 
-    async def _hook_apply(self, strip, req):
-        if req.get("snapshot"):
-            st = await strip.read_state()
-            req["_state"] = {"on": st.on, "mode": st.mode, "sub": st.sub, "bright": st.bright,
-                     "rgb": f"{st.r:02x}{st.g:02x}{st.b:02x}", "w": st.w}
-        prev = req.get("prev")
-        if prev:
-            p = db.State(on=prev["on"], mode=prev.get("mode", 1), sub=prev.get("sub", 0), bright=prev.get("bright", 100),
-                         r=int(prev.get("rgb", "000000")[0:2], 16), g=int(prev.get("rgb", "000000")[2:4], 16),
-                         b=int(prev.get("rgb", "000000")[4:6], 16), w=prev.get("w", 0))
-            frames = p.restore_frames()
-        elif req["cmd"] == "off":
-            frames = [db.switch(False)]
-        else:
-            h = req["rgb"]
-            frames = [db.switch(True)] + db.color(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-        await strip.send(frames)
-
     def _run(self, coro):
         try:
             return {"ok": True, "result": asyncio.run_coroutine_threadsafe(coro, self.loop).result(30)}
@@ -93,8 +72,6 @@ class Api:
             return {"ok": False, "error": str(e)}
 
     async def _strip(self):
-        if self.ble is None:
-            self.ble = asyncio.Lock()
         if self.strip is None or self.strip.name_prefix != self.cfg["name"]:
             if self.strip:
                 await self.strip.disconnect()
@@ -102,15 +79,11 @@ class Api:
         return self.strip
 
     async def _send(self, frames):
-        strip = await self._strip()
-        async with self.ble:
-            await strip.send(frames)
+        await (await self._strip()).send(frames)
         return True
 
     async def _state(self):
-        strip = await self._strip()
-        async with self.ble:
-            st = await strip.read_state()
+        st = await (await self._strip()).read_state()
         return {"on": st.on, "mode": st.mode, "sub": st.sub, "bright": st.bright, "speed": st.speed,
                 "sensitivity": st.sensitivity, "rgb": f"#{st.r:02x}{st.g:02x}{st.b:02x}", "w": st.w,
                 "device_mic": st.device_mic, "power_on": st.power_on_reaction, "timers": st.timers,
@@ -187,15 +160,8 @@ class Api:
         """Run the Claude Code hook script so the user can see red / green / restore."""
         if not os.path.exists(LED_PY):
             return {"ok": False, "error": "led.py not installed; run install.sh"}
-        self._run(self._strip_release())
-        p = subprocess.run([LED_PY, what], capture_output=True, text=True, timeout=60)
+        p = subprocess.run([LED_PY, what], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
         return {"ok": p.returncode == 0, "error": (p.stderr or p.stdout).strip()}
-
-    async def _strip_release(self):
-        if self.strip:
-            async with self.ble:
-                await self.strip.disconnect()
-        return True
 
 
 HTML = r"""<!doctype html><html><head><meta charset="utf-8"><title>AiLamp</title>
@@ -264,8 +230,8 @@ button.b:hover{border-color:var(--acc)}button.b.on{background:var(--acc);border-
   <div class="row"><label>After power cut</label><select id="pon"><option value="0">Stay off</option><option value="1">Turn on</option><option value="2">Last state</option></select><button class="b" onclick="setPon()">Apply</button></div>
   <div class="row"><label>DIY RGB index</label><input type="checkbox" id="rgbidx"><span class="hint">tick if DIY scenes come out wrong</span></div></div>
  <div class="card"><h3 style="margin:0 0 8px">Claude Code status light</h3>
-  <div class="row"><label>Idle colour</label><input type="color" id="idle"><span class="hint">colour to return to after Claude's red / green</span></div>
-  <div class="row"><label>Try it</label><button class="b" onclick="hook('red')">Red</button><button class="b" onclick="hook('green')">Green</button><button class="b" onclick="hook('restore')">Restore</button><span id="hookstat" class="hint"></span></div></div>
+  <div class="row"><label>Idle colour</label><input type="color" id="idle"><span class="hint">shown while Claude works and after the 5 s green</span></div>
+  <div class="row"><label>Try it</label><button class="b" onclick="hook('attention')">Needs you</button><button class="b" onclick="hook('done')">Done</button><button class="b" onclick="hook('working')">Working</button><span id="hookstat" class="hint"></span></div></div>
  <div class="row"><label></label><button class="b on" onclick="saveSettings()">Save settings</button></div>
  <div class="card"><p class="hint" id="raw"></p></div><div class="err" id="e-settings"></div>
 </section>

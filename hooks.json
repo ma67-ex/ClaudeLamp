@@ -3,7 +3,12 @@
     {
       "matcher": "AskUserQuestion",
       "hooks": [
-        { "type": "command", "command": "(~/.claude/scripts/led.py red >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED red: question" }
+        {
+          "type": "command",
+          "command": "(~/.claude/scripts/led.py attention >/dev/null 2>&1 &)",
+          "timeout": 10,
+          "statusMessage": "LED: needs you"
+        }
       ]
     }
   ],
@@ -11,28 +16,48 @@
     {
       "matcher": "permission_prompt",
       "hooks": [
-        { "type": "command", "command": "(~/.claude/scripts/led.py red >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED red: permission" }
+        {
+          "type": "command",
+          "command": "(~/.claude/scripts/led.py attention >/dev/null 2>&1 &)",
+          "timeout": 10,
+          "statusMessage": "LED: needs you"
+        }
       ]
     }
   ],
   "Stop": [
     {
       "hooks": [
-        { "type": "command", "command": "(~/.claude/scripts/led.py green >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED green: done" }
+        {
+          "type": "command",
+          "command": "(~/.claude/scripts/led.py done <<< \"$(cat)\" >/dev/null 2>&1 &)",
+          "timeout": 10,
+          "statusMessage": "LED: done"
+        }
       ]
     }
   ],
   "UserPromptSubmit": [
     {
       "hooks": [
-        { "type": "command", "command": "(~/.claude/scripts/led.py restore >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED restore" }
+        {
+          "type": "command",
+          "command": "(~/.claude/scripts/led.py working >/dev/null 2>&1 &)",
+          "timeout": 10,
+          "statusMessage": "LED: working"
+        }
       ]
     }
   ],
   "PostToolUse": [
     {
       "hooks": [
-        { "type": "command", "command": "(~/.claude/scripts/led.py unred >/dev/null 2>&1 &)", "timeout": 5, "statusMessage": "LED unred" }
+        {
+          "type": "command",
+          "command": "(~/.claude/scripts/led.py unattention >/dev/null 2>&1 &)",
+          "timeout": 10,
+          "statusMessage": "LED: working"
+        }
       ]
     }
   ]

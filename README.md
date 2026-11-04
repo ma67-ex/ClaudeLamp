@@ -2,9 +2,10 @@
 
 Turn a cheap Bluetooth LED strip into a status light for Claude Code.
 
-- Claude asks you a question or needs a permission: strip turns **red**
-- Claude finishes a turn: strip turns **green**
-- You reply: strip goes back to your normal colour
+- Claude is working: strip shows your idle colour (purple by default)
+- Claude asks a question or needs a permission: strip **strobes red** at full speed
+- Claude finishes a turn: strip turns **green for 5 seconds**, then back to idle
+- You reply, or you grant the permission: back to idle
 
 Tested on macOS with a DayBetter strip (BLE name `P065_17f3`). Also speaks the ELK-BLEDOM / MELK protocol used by most generic "Bluetooth LED strip" controllers.
 
@@ -49,9 +50,9 @@ Close the vendor phone app first. A BLE strip stops advertising while the app is
 ## Commands
 
 ```
-~/.claude/scripts/led.py red            # alert colour
-~/.claude/scripts/led.py green          # done colour
-~/.claude/scripts/led.py restore        # back to idle colour
+~/.claude/scripts/led.py attention      # red strobe, max speed
+~/.claude/scripts/led.py done           # green 5 s, then idle
+~/.claude/scripts/led.py working        # idle colour
 ~/.claude/scripts/led.py set RRGGBB     # set colour now and make it the idle colour
 ~/.claude/scripts/led.py idle RRGGBB    # change idle colour (or: idle off)
 ~/.claude/scripts/led.py on | off
@@ -64,15 +65,15 @@ Claude Code hooks in `~/.claude/settings.json` run `led.py` in the background on
 
 | Event | Matcher | Colour |
 |---|---|---|
-| `PreToolUse` | `AskUserQuestion` | red |
-| `Notification` | `permission_prompt` | red |
-| `Stop` | | green |
+| `PreToolUse` | `AskUserQuestion` | red strobe |
+| `Notification` | `permission_prompt` | red strobe |
+| `Stop` | | green 5 s, then idle. If Claude's last message ends with "?", red strobe instead |
 | `UserPromptSubmit` | | idle |
-| `PostToolUse` | any tool | idle, only if currently red (permission was granted) |
+| `PostToolUse` | any tool | idle, only if currently strobing (permission was granted) |
 
 `led.py` connects to the strip over BLE with `bleak`, writes the colour frames, disconnects. Each change takes about two seconds. A file lock serialises overlapping hook calls so two connections never race for the radio.
 
-Before turning red or green, `led.py` asks the strip for its current state (power, mode, colour, brightness, scene) and saves it. "Restore" replays that exact state. If no snapshot exists, it falls back to the `idle` colour in `~/.claude/led-state.json`.
+The idle colour lives in `~/.claude/led-state.json`; change it with `led.py idle RRGGBB` or in the app's Settings tab.
 
 See [PLAN.md](PLAN.md) for the full protocol notes and a step-by-step rebuild guide for another agent.
 

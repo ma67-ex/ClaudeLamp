@@ -239,6 +239,7 @@ class Strip:
         self.name_prefix = name_prefix
         self.idle = idle
         self.client = None
+        self.lock = asyncio.Lock()
         self._last = 0.0
         self._replies: asyncio.Queue = asyncio.Queue()
         self._idle_task = None
@@ -264,11 +265,16 @@ class Strip:
     async def _idle_watch(self):
         while True:
             await asyncio.sleep(0.5)
-            if time.monotonic() - self._last >= self.idle:
-                await self.disconnect()
-                return
+            async with self.lock:
+                if time.monotonic() - self._last >= self.idle:
+                    await self._disconnect()
+                    return
 
     async def disconnect(self):
+        async with self.lock:
+            await self._disconnect()
+
+    async def _disconnect(self):
         if self.client:
             try:
                 await self.client.disconnect()
@@ -277,6 +283,10 @@ class Strip:
             self.client = None
 
     async def send(self, frames: bytes | list[bytes]):
+        async with self.lock:
+            await self._send(frames)
+
+    async def _send(self, frames):
         await self.connect()
         for fr in ([frames] if isinstance(frames, bytes) else frames):
             await self.client.write_gatt_char(WRITE_UUID, fr, response=True)
@@ -284,6 +294,10 @@ class Strip:
         self._touch()
 
     async def query(self, frame: bytes, reply_cmd: int, timeout: float = 2.0) -> bytes:
+        async with self.lock:
+            return await self._query(frame, reply_cmd, timeout)
+
+    async def _query(self, frame: bytes, reply_cmd: int, timeout: float = 2.0) -> bytes:
         await self.connect()
         while not self._replies.empty():
             self._replies.get_nowait()
@@ -300,13 +314,14 @@ class Strip:
         raise RuntimeError("no reply from strip")
 
     async def read_state(self) -> State:
-        st = parse_state(await self.query(pack(CMD_READ_STATE, 1), CMD_READ_STATE))
-        if not st.timers:
-            try:
-                st.timers = parse_timers((await self.query(pack(CMD_READ_ALARM, 1), CMD_READ_ALARM))[3:-2])
-            except RuntimeError:
-                pass
-        return st
+        async with self.lock:
+            st = parse_state(await self._query(pack(CMD_READ_STATE, 1), CMD_READ_STATE))
+            if not st.timers:
+                try:
+                    st.timers = parse_timers((await self._query(pack(CMD_READ_ALARM, 1), CMD_READ_ALARM))[3:-2])
+                except RuntimeError:
+                    pass
+            return st
 
 
 if __name__ == "__main__":
