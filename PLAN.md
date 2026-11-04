@@ -94,6 +94,31 @@ Different UUIDs from the homebridge project (`e065` instead of `e026`) but the s
 
 Subscribe to the notify characteristic, then send candidate frames. ELK frames (`7e 00 04 01 00 00 00 00 ef`) produced no reply. `A0` frames produced `A1` ACKs. Protocol confirmed. A later blue, then red, then green sequence confirmed the channel order is plain RGB.
 
+### 3.6 Full command set (from the decompiled app)
+
+Decompile: `brew install jadx`, download `com.th.daybetter` 1.9.4 from Aptoide, `jadx --no-res -d out app.apk`, read `com/th/qc/command/CommandUtil.java`, `com/th/common/protocol/qc/QCLightProtocol.java` and `assets/qc_default_mode_data.json`. All frames use `pack(cmd, payload...)` = `A0 cmd len payload crc`.
+
+| cmd | payload | meaning |
+|---|---|---|
+| `10` | `01` | read state; reply `A1 10 ...` = on, mode, sub, bright, speed, sensitivity, r, g, b, w, orderR, orderG, orderB, hasMic |
+| `11` | `01` / `00` | power on / off |
+| `12` | `mode sub` | mode. `01 00` colour, `00 00` white, `<scene> FF` built-in scene, `C2 <C1\|C2\|C3>` DIY dynamic / breathe / strobe, `A0 <0-3>` device mic |
+| `13` | `1..100` | brightness |
+| `15` | `r g b FF` | static colour (send mode `01 00` first) |
+| `16` | `1..100` | effect speed |
+| `17` | `1..100` | microphone sensitivity |
+| `20` | `FF FF (255-w) w` | tunable white, w = warmth (send mode `00 00` first) |
+| `21` | `01` / `00` | start / stop music reaction |
+| `2B` | `n` | peak stay (gradual peak firmware only) |
+| `34` | `num en week h m s act` | timer. num 1 = on, 2 = off. week bits Mon=1 .. Sun=64, 0x80 = once. act 1 = on, 0 = off |
+| `35` | `01` | read timers; reply holds two 7-byte records |
+| `5C` | `0 / 1 / 2` | after power cut: off / on / last state |
+| `A3` | chunked | DIY: data = `C2 pattern bright speed (r g b 65)*` split in 12-byte chunks, each `A0 A3 len idx total idx-1 chunk crc` |
+
+Built-in scene ids for P065 (31): statics `02`..`08`, jumps `09` `0A`, gradients `0B` `0C` `14` `15` `16`, breaths `0D`..`13` `23` `24`, strobes `17`..`1E`. Names are in `daybetter.py`.
+
+The strip answers every frame with the same frame prefixed `A1`; the state query answers with the state record. This strip's state record is 14 bytes (no power-on-reaction or timer bytes), so timers are read with `35`.
+
 ## 4. The script: `led.py`
 
 Install location: `~/.claude/scripts/led.py`, executable. It is a `uv` inline script; the shebang `#!/usr/bin/env -S uv run --quiet --script` plus the `# /// script` block make `uv` create and cache a venv with `bleak` on first run.
@@ -122,6 +147,12 @@ Add to `~/.claude/settings.json` under `"hooks"` (the installer merges `hooks.js
 | `Stop` | none | `led.py green` | Claude finished its turn |
 | `UserPromptSubmit` | none | `led.py restore` | user replied |
 | `PostToolUse` | none | `led.py unred` | a tool ran after a red state, meaning the permission was granted; go back to idle. No-op otherwise. |
+
+## 5b. The desktop app: `app.py` + `daybetter.py`
+
+`daybetter.py` holds the protocol (frame builders, state parser, scene table) and `Strip`, an async bleak client that disconnects after 3 s idle. `app.py` is a pywebview window (WKWebView, HTML inline) whose JavaScript calls Python methods on `Api`. BLE work runs on one asyncio loop in a background thread, serialised by an `asyncio.Lock`.
+
+While the app runs it listens on the unix socket `~/.claude/ailamp.sock`. `led.py` checks for that socket first and, if present, sends `{"cmd", "rgb", "snapshot", "prev"}` as one JSON line and lets the app do the BLE work. That avoids two processes fighting over one peripheral and a deadlock that appeared when both also shared the file lock: the hook holds the lock while it waits for the app, so the app must never take it.
 
 ## 6. Install steps for a fresh machine
 
