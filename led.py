@@ -78,6 +78,9 @@ def save(st):
         json.dump(st, f)
 
 
+HOOK_STATE = {"state": "idle"}   # set by main() before send(); forwarded to the app for its Claude badge
+
+
 def send_via_app(daybetter_frames: list[bytes]) -> bool:
     """Desktop app running: let it write the frames. Returns False when it is not running."""
     import socket
@@ -87,7 +90,7 @@ def send_via_app(daybetter_frames: list[bytes]) -> bool:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sk:
             sk.settimeout(30)
             sk.connect(SOCK)
-            sk.sendall((json.dumps({"frames": [f.hex() for f in daybetter_frames]}) + "\n").encode())
+            sk.sendall((json.dumps({"frames": [f.hex() for f in daybetter_frames], "state": HOOK_STATE["state"]}) + "\n").encode())
             reply = json.loads(sk.makefile().readline())
     except (OSError, ValueError):
         return False  # stale socket; fall back to direct BLE
@@ -179,6 +182,7 @@ def main(argv):
         if cmd == "set":
             st["idle"] = argv[2].lower()
             cmd = "working"
+        HOOK_STATE["state"] = {"attention": "needs you", "done": "done"}.get(cmd, "working")
         if cmd in ("working", "restore", "on"):
             send(st["name"], *idle_cmd(st))
             st["mode"] = "idle"
@@ -190,6 +194,7 @@ def main(argv):
             st["mode"] = "done"
             save(st)
             time.sleep(GREEN_SECONDS)
+            HOOK_STATE["state"] = "idle"
             send(st["name"], *idle_cmd(st))
             st["mode"] = "idle"
         elif cmd == "off":

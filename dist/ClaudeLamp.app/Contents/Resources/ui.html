@@ -226,6 +226,7 @@ function music(on){call('e-music',()=>api().music(on,$('#micmode').value,$('#sen
 let musicOn=false;
 function musicHost(){musicOn=!musicOn;$('#musicb').textContent=musicOn?'Stop listening':'Start listening';setPower(true);if(musicOn)setVis('music',['#ff00ff'],'static');else setVis('static',[curHex()],'static');call('e-music',()=>api().music_host(musicOn,$('#hsens').value));}
 $('#hsens').oninput=e=>{if(musicOn)api().music_host(true,e.target.value);};
+setInterval(()=>{if(!window.pywebview)return;api().claude_state().then(c=>{const b=$('#claude');b.querySelector('span').textContent='Claude · '+c.state;b.querySelector('i').style.background=b.querySelector('i').style.boxShadow='';const col={ 'needs you':'#ff3b3b','done':'#2bff5c','working':'var(--c)','idle':'var(--c)'}[c.state]||'var(--c)';b.querySelector('i').style.background=col;b.querySelector('i').style.boxShadow='0 0 12px '+col;});},2000);
 setInterval(()=>{if(!window.pywebview||!musicOn)return;api().music_level().then(l=>{audioLevel=l;$('#lvl').style.width=Math.round(l*100)+'%';});},80);
 /* timers, settings */
 function buildWeek(n){const w=$('#w'+n);w.innerHTML='';DAYS.forEach((d,i)=>{const b=document.createElement('button');b.className='b';b.textContent=d;b.onclick=()=>{weeks[n]^=(1<<i);b.classList.toggle('on',!!(weeks[n]&(1<<i)));};w.appendChild(b);});}

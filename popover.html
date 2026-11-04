@@ -31,7 +31,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;heigh
 <div class="head"><div class="logo"><i></i></div><b>ClaudeLamp</b>
  <button class="ib" title="Open full app" onclick="api().open_full()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 4h6v6M20 4l-8 8M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></svg></button>
  <button id="pw" class="ib pw" title="Power" onclick="togglePower()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg></button></div>
-<div class="status"><i></i><span id="status">connecting…</span></div>
+<div class="status"><i></i><span id="status">connecting…</span><span style="margin-left:auto" id="cl">Claude · idle</span></div>
 <canvas id="strip"></canvas>
 <div class="body">
  <div class="card"><div class="lbl">Brightness<span id="bv">100%</span></div><input id="bright" type="range" min="1" max="100" value="100"></div>
@@ -94,4 +94,5 @@ function applyState(s){setPower(s.on);$('#bright').value=s.bright;$('#bv').textC
  (s.timers||[]).forEach(t=>{if(t.number===2&&t.enable){$('#tv').textContent='off at '+String(t.hour).padStart(2,'0')+':'+String(t.minute).padStart(2,'0');}});}
 function refresh(){api().get_state().then(r=>{if(r.ok)applyState(r.result);else $('#status').textContent=r.error;});}
 window.addEventListener('DOMContentLoaded',refresh);
+setInterval(()=>api().claude_state().then(c=>{$('#cl').textContent='Claude · '+c.state;}),2000);
 </script></body></html>

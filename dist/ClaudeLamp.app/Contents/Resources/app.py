@@ -82,6 +82,7 @@ class Api:
         self.sens = 50
         self._level = 0.0
         self._audio = None
+        self._claude_state, self._claude_at = "idle", 0
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
         self.strip = None
@@ -97,6 +98,8 @@ class Api:
         """led.py sends {"frames": [hex, ...]} as one line; we write them on our connection and answer {"ok": true}."""
         try:
             req = json.loads((await reader.readline()).decode())
+            self._claude_state = req.get("state", self._claude_state)
+            self._claude_at = time.time()
             self._stop_chaos()  # a status change from Claude beats the party
             self.music_host(False, self.sens)
             await (await self._strip()).send([bytes.fromhex(h) for h in req["frames"]])
@@ -237,6 +240,10 @@ class Api:
             if t:
                 t.cancel()
         return {"ok": True}
+
+    def claude_state(self):
+        """Last state the Claude Code hook reported: working / needs you / done / idle."""
+        return {"state": getattr(self, "_claude_state", "idle"), "at": getattr(self, "_claude_at", 0)}
 
     def music_level(self):
         return float(getattr(self, "_level", 0.0))
@@ -427,6 +434,17 @@ def _install_menubar(api, window):
     api._own_activate_at, api._install_at = 0.0, time.monotonic()
     from Foundation import NSNotificationCenter
     NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(target, "activated:", "NSApplicationDidBecomeActiveNotification", None)
+    # Dock click / reopen while already active sends no activation notification; hook the delegate method instead
+    try:
+        delegate = NSApplication.sharedApplication().delegate()
+
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, app, flag):
+            print("[menubar] reopen -> full window", file=sys.stderr)
+            api.open_full()
+            return False
+        objc.classAddMethods(type(delegate), [applicationShouldHandleReopen_hasVisibleWindows_])
+    except Exception as e:
+        print("[menubar] reopen hook failed:", e, file=sys.stderr)
     print("[menubar] status item + popover installed", file=sys.stderr)
 
 
