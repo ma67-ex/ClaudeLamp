@@ -359,6 +359,7 @@ def _install_menubar(api, window):
                 if pop.isShown():
                     pop.close()
                     return
+                api._main_window.hide()                                            # one surface at a time
                 btn = api._status_item.button()
                 pop.showRelativeToRect_ofView_preferredEdge_(btn.bounds(), btn, 1)   # 1 = NSMinYEdge, below the bar
                 NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
