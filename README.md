@@ -1,82 +1,107 @@
+<div align="center">
+
+<img src="docs/images/logo.png" width="110" alt="ClaudeLamp logo">
+
 # ClaudeLamp
 
-Turn a cheap Bluetooth LED strip into a status light for Claude Code.
+**Your LED strip shows what Claude Code is doing. Purple while it works, red when it needs you, green when it is done.**
 
-- Claude is working: strip shows your idle colour (purple by default)
-- Claude asks a question or needs a permission: strip **strobes red** at full speed
-- Claude finishes a turn: strip **strobes green** at full speed for 5 seconds, then back to idle
-- You reply, or you grant the permission: back to idle
+![macOS 13+](https://img.shields.io/badge/macOS-13%2B-1f2937?style=flat-square&logo=apple&logoColor=white)
+![Bluetooth LE](https://img.shields.io/badge/Bluetooth-LE-0ea5e9?style=flat-square)
+![Free](https://img.shields.io/badge/price-free-34d399?style=flat-square)
+![MIT](https://img.shields.io/badge/license-MIT-6366f1?style=flat-square)
 
-Tested on macOS with a DayBetter strip (BLE name `P065_17f3`). Also speaks the ELK-BLEDOM / MELK protocol used by most generic "Bluetooth LED strip" controllers.
+<img src="docs/images/light.png" width="780" alt="ClaudeLamp main window">
 
-## Desktop app
+</div>
+
+## What it does
+
+Claude Code runs long tasks. You look away, and you miss the moment it asks a question. ClaudeLamp puts that moment on the wall.
+
+- **Purple** while Claude works.
+- **Red strobe** when Claude asks a question, waits for a permission, or ends a message with "?". It gives up after five minutes and goes back to purple, so it will not strobe all night.
+- **Green strobe** for five seconds when Claude finishes, then back to purple.
+- **A full app for the strip.** Colour, white, brightness, 31 built-in scenes, custom scenes, music mode, timers, power-on behaviour.
+- **A menu bar panel** for the quick things: colour, brightness, scenes, off timer.
+- **A live strip on screen** that mirrors the real one and reacts to your cursor.
+- **Free and local.** Bluetooth only. No account, no cloud.
+
+Built for the DayBetter P065 strip. Also speaks the ELK-BLEDOM / MELK protocol used by most generic "Bluetooth LED strip" controllers.
+
+## Install (3 minutes)
+
+1. Press **⌘ Space**, type **Terminal**, press **Return**.
+2. Paste this line and press **Return**:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/ma67-ex/ClaudeLamp/main/install.sh | bash
+   ```
+
+3. Wait until it says **All done**. ClaudeLamp appears in your menu bar and in Applications.
+
+The first launch downloads its Python libraries, so give it a minute. If macOS asks about Bluetooth or the microphone, click **Allow**.
+
+Your strip must not be connected to the phone app at the same time. Close the DayBetter app on your phone, or the Mac will not see the strip.
+
+## Use it
+
+1. Click the small **bulb** at the top right of your screen. The panel opens.
+2. Drag a slider or tap a scene. Your strip changes.
+3. Click **Open ClaudeLamp** for the full window. Click the **bulb** again to come back to the panel.
+
+<div align="center">
+<img src="docs/images/popover.png" width="300" alt="Menu bar panel">
+&nbsp;&nbsp;
+<img src="docs/images/scenes.png" width="460" alt="Scenes tab">
+</div>
+
+Then start a Claude Code session and watch the strip. The badge in the header shows the same state: **working**, **needs you**, **done**.
+
+### The tabs
+
+| Tab | What is there |
+|---|---|
+| Light | Hue and saturation, preset swatches, brightness, tunable white |
+| Scenes | Ultimate Disco, Police, Chaos, all 31 built-in effects, speed |
+| DIY | Your own colour list with Dynamic, Breathe or Strobe patterns |
+| Music | The Mac listens through its microphone; bass hits change the hue, loudness sets brightness |
+| Timer | Turn-on and turn-off times, daily or once |
+| Settings | Behaviour after a power cut, strip name, Claude idle colour, hook test buttons |
+
+<div align="center">
+<img src="docs/images/music.png" width="620" alt="Music tab">
+</div>
+
+## How the status light works
+
+Claude Code hooks in `~/.claude/settings.json` run a small script on five events. The script talks to the strip over Bluetooth, or hands the job to the running app so the two never fight over the radio.
+
+| Claude Code event | Strip |
+|---|---|
+| You send a message | purple |
+| `AskUserQuestion` or a permission prompt | red strobe, full speed, for up to 5 minutes |
+| Claude finishes a turn | green strobe for 5 s, then purple |
+| Claude finishes with a question | red strobe |
+| Permission granted, Claude continues | purple |
+
+Change the idle colour in **Settings**, or with:
 
 ```bash
-./app.py
+~/.claude/scripts/led.py idle RRGGBB
 ```
 
-Every control the DayBetter phone app offers for this strip, from the Mac:
+## Privacy
 
-- Light: power, brightness, colour wheel and swatches, tunable white
-- Scenes: the 31 built-in effects (statics, gradients, jumps, breaths, strobes) with speed
-- DIY: your own colour list with Dynamic / Breathe / Strobe patterns
-- Music: device-microphone mode with style and sensitivity (this strip reports no mic, so it is best effort)
-- Timer: daily or one-shot turn-on and turn-off timers with weekday repeat
-- Settings: behaviour after a power cut, BLE name, Claude idle colour, and buttons to try the red / green / restore hooks
+Everything stays on your Mac. The app never opens a network connection; the only radio it uses is Bluetooth to your strip. Music mode listens through the microphone only while you have it switched on.
 
-While the app is open it owns the Bluetooth connection, and the hook script hands its commands to the app over a local socket (`~/.claude/claudelamp.sock`), so Claude's status light keeps working.
+## For developers
 
-![ClaudeLamp settings tab](docs/app.png)
+The protocol was recovered from the DayBetter Android app and verified on hardware. [PLAN.md](PLAN.md) has the full command table, the state record layout, how to rebuild everything from scratch, and what the strip cannot do (it is single-zone, so no colour segments).
 
-## Install
+- `daybetter.py` – frame builders, state parser, async Bluetooth client
+- `led.py` – the hook script
+- `app.py` + `ui.html` + `popover.html` – the desktop app and the menu bar panel
+- `build_app.sh` – builds `ClaudeLamp.app`
 
-```bash
-brew install uv            # if you do not have it
-git clone https://github.com/ma67-ex/ClaudeLamp
-cd ClaudeLamp
-./install.sh P065_17F3 ff8c3c   # <BLE name> <idle colour hex>
-```
-
-The installer copies `led.py` to `~/.claude/scripts/`, writes `~/.claude/led-state.json`, and merges `hooks.json` into `~/.claude/settings.json` (your old settings are backed up to `settings.json.bak-claudelamp`).
-
-Find your strip's BLE name with:
-
-```bash
-~/.claude/scripts/led.py scan
-```
-
-Close the vendor phone app first. A BLE strip stops advertising while the app is connected to it, so the Mac cannot see it.
-
-## Commands
-
-```
-~/.claude/scripts/led.py attention      # red strobe, max speed
-~/.claude/scripts/led.py done           # green 5 s, then idle
-~/.claude/scripts/led.py working        # idle colour
-~/.claude/scripts/led.py set RRGGBB     # set colour now and make it the idle colour
-~/.claude/scripts/led.py idle RRGGBB    # change idle colour (or: idle off)
-~/.claude/scripts/led.py on | off
-~/.claude/scripts/led.py scan
-```
-
-## How it works
-
-Claude Code hooks in `~/.claude/settings.json` run `led.py` in the background on these events:
-
-| Event | Matcher | Colour |
-|---|---|---|
-| `PreToolUse` | `AskUserQuestion` | red strobe |
-| `Notification` | `permission_prompt` | red strobe |
-| `Stop` | | green strobe 5 s, then idle. If Claude's last message ends with "?", red strobe instead |
-| `UserPromptSubmit` | | idle |
-| `PostToolUse` | any tool | idle, only if currently strobing (permission was granted) |
-
-`led.py` connects to the strip over BLE with `bleak`, writes the colour frames, disconnects. Each change takes about two seconds. A file lock serialises overlapping hook calls so two connections never race for the radio.
-
-The idle colour lives in `~/.claude/led-state.json`; change it with `led.py idle RRGGBB` or in the app's Settings tab.
-
-See [PLAN.md](PLAN.md) for the full protocol notes and a step-by-step rebuild guide for another agent.
-
-## License
-
-MIT
+Free to use and change under the [MIT License](LICENSE). If it helps you, give it a ⭐.

@@ -98,6 +98,12 @@ class Api:
         """led.py sends {"frames": [hex, ...]} as one line; we write them on our connection and answer {"ok": true}."""
         try:
             req = json.loads((await reader.readline()).decode())
+            if "js" in req:                                   # local debugging aid: run JS in the main window
+                self._main_window.evaluate_js(req["js"])
+                writer.write(b'{"ok": true}\n')
+                await writer.drain()
+                writer.close()
+                return
             self._claude_state = req.get("state", self._claude_state)
             self._claude_at = time.time()
             self._stop_chaos()  # a status change from Claude beats the party
@@ -412,7 +418,7 @@ def _install_menubar(api, window):
     pop = NSPopover.alloc().init()
     pop.setContentViewController_(vc)
     pop.setContentSize_((POP_W, POP_H))
-    pop.setBehavior_(1)                                                  # transient: closes on outside click
+    pop.setBehavior_(0 if os.environ.get("CLAUDELAMP_SHOT") else 1)      # transient: closes on outside click
     pop.setAnimates_(True)
     pop.setAppearance_(NSAppearance.appearanceNamed_("NSAppearanceNameVibrantDark"))
 
@@ -453,7 +459,7 @@ def main():
     api = Api()
     here = os.path.dirname(os.path.abspath(__file__))
     window = webview.create_window("ClaudeLamp", url=os.path.join(here, "ui.html"), js_api=api, width=1180, height=760,
-                                   min_size=(820, 600), hidden=True)   # launch goes to the menu bar popover first
+                                   min_size=(820, 600), hidden=not os.environ.get("CLAUDELAMP_SHOW_MAIN"))  # launch goes to the popover
     api._main_window = window
 
     def on_closing():
@@ -465,8 +471,17 @@ def main():
     def after_start():
         from PyObjCTools import AppHelper
         AppHelper.callAfter(install_menubar, api, window)
-        time.sleep(1.5)                                     # let the status item lay out, then open the popover
-        AppHelper.callAfter(lambda: api._menu_target.toggle_(api._status_item.button()))
+        if not os.environ.get("CLAUDELAMP_SHOW_MAIN"):
+            for _ in range(40):                             # wait until the status button has a real frame
+                time.sleep(0.25)
+                item = getattr(api, "_status_item", None)
+                try:
+                    if item and item.button().window() and item.button().window().frame().size.width > 0:
+                        break
+                except Exception:
+                    pass
+            time.sleep(0.5)
+            AppHelper.callAfter(lambda: api._menu_target.toggle_(api._status_item.button()))
 
     try:
         webview.start(after_start)

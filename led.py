@@ -21,6 +21,7 @@ STATE = os.path.expanduser("~/.claude/led-state.json")
 SOCK = os.path.expanduser("~/.claude/claudelamp.sock")
 DEFAULT = {"name": "P065_17F3", "idle": "4b0082", "mode": "idle"}
 GREEN_SECONDS = 5
+ATTENTION_SECONDS = int(os.environ.get("LED_ATTENTION_SECONDS", "300"))   # red strobe gives up after this, back to idle
 
 # Protocol A: ELK-BLEDOM / MELK family. Service fff0, write char fff3, frames 7e..ef.
 ELK_CHAR = "0000fff3-0000-1000-8000-00805f9b34fb"
@@ -168,6 +169,17 @@ def main(argv):
         return print(__doc__)
     if cmd == "done" and claude_asked_question():
         cmd = "attention"
+    if cmd == "attention-expire":
+        time.sleep(ATTENTION_SECONDS)             # outside the lock, other hooks keep flowing
+        with open(STATE + ".lock", "w") as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            st = load()
+            if st.get("mode") == "attention" and str(st.get("attention_at")) == argv[2]:
+                HOOK_STATE["state"] = "idle"
+                send(st["name"], *idle_cmd(st))
+                st["mode"] = "idle"
+                save(st)
+        return
     # ponytail: one global lock so overlapping hooks (Stop then UserPromptSubmit) run in order
     with open(STATE + ".lock", "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
@@ -189,6 +201,11 @@ def main(argv):
         elif cmd == "attention":
             send(st["name"], "attention", None)
             st["mode"] = "attention"
+            st["attention_at"] = time.time()
+            # a detached watcher puts the strip back to idle if nobody answers, so it does not strobe all night
+            import subprocess
+            subprocess.Popen([os.path.abspath(__file__), "attention-expire", str(st["attention_at"])],
+                             start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         elif cmd == "done":
             send(st["name"], "done", None)
             st["mode"] = "done"

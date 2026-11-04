@@ -149,7 +149,7 @@ Add to `~/.claude/settings.json` under `"hooks"` (the installer merges `hooks.js
 | `UserPromptSubmit` | none | `led.py working` | user replied |
 | `PostToolUse` | none | `led.py unattention` | a tool ran after an attention state, meaning the permission was granted; back to idle. No-op otherwise. |
 
-Attention = DayBetter scene `0x18` (Red Strobe) with speed 100, or ELK effect `0x96` (blink red) with speed 100. Done = scene `0x19` (Green Strobe) at speed 100, `sleep 5`, idle colour; the script holds the file lock during the 5 s so a `working` hook that fires meanwhile runs afterwards.
+Attention = DayBetter scene `0x18` (Red Strobe) with speed 100, or ELK effect `0x96` (blink red) with speed 100. The script also spawns a detached `led.py attention-expire <stamp>` watcher that sleeps `LED_ATTENTION_SECONDS` (default 300) and then, if the state file still shows that same attention, sends the idle colour. The sleep happens outside the file lock so other hooks are never blocked. Done = scene `0x19` (Green Strobe) at speed 100, `sleep 5`, idle colour; the script holds the file lock during the 5 s so a `working` hook that fires meanwhile runs afterwards.
 
 ## 5b. The desktop app: `app.py` + `daybetter.py`
 

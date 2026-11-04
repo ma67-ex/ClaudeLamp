@@ -187,6 +187,7 @@ drawStrip();
 function err(id,r){$('#'+id).textContent=r&&r.ok===false?r.error:'';}
 function call(id,fn){return fn().then(r=>{err(id,r);return r;}).catch(e=>{$('#'+id).textContent=String(e);});}
 function throttle(fn,ms){let t,last=0,a;return(...args)=>{a=args;const now=Date.now();if(now-last>=ms){last=now;fn(...a);}else{clearTimeout(t);t=setTimeout(()=>{last=Date.now();fn(...a);},ms-(now-last));}};}
+function showTab(t){const b=document.querySelector(`nav button[data-t="${t}"]`);if(b)b.click();}
 document.querySelectorAll('nav button[data-t]').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button[data-t],section').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#'+b.dataset.t).classList.add('on');});
 function setPower(on){power=on;$('#pw').classList.toggle('on',on);}
 function togglePower(){setPower(!power);call('e-light',()=>api().power(power));}
