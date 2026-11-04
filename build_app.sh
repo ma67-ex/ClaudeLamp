@@ -32,35 +32,7 @@ cat > "$APP/Contents/Info.plist" <<'PL'
   <key>NSMicrophoneUsageDescription</key><string>Music mode listens to the room and drives the strip.</string>
 </dict></plist>
 PL
-# icon: dark rounded tile with a glowing purple LED strip
-uv run --quiet --with pillow python3 - "$APP/Contents/Resources" <<'PY'
-import sys, os
-from PIL import Image, ImageDraw, ImageFilter
-out = sys.argv[1]; S = 1024
-img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-d = ImageDraw.Draw(img)
-d.rounded_rectangle((60, 60, S-60, S-60), radius=220, fill=(12, 12, 18, 255))
-glow = Image.new("RGBA", (S, S), (0, 0, 0, 0)); g = ImageDraw.Draw(glow)
-for i in range(7):
-    x = 200 + i * 104
-    g.ellipse((x-60, S//2-60, x+60, S//2+60), fill=(120, 60, 255, 255))
-glow = glow.filter(ImageFilter.GaussianBlur(70))
-img.alpha_composite(glow)
-d = ImageDraw.Draw(img)
-d.line((150, S//2, S-150, S//2), fill=(40, 40, 52, 255), width=44)
-for i in range(7):
-    x = 200 + i * 104
-    d.ellipse((x-34, S//2-34, x+34, S//2+34), fill=(190, 150, 255, 255))
-    d.ellipse((x-14, S//2-22, x+6, S//2-6), fill=(255, 255, 255, 220))
-mask = Image.new("L", (S, S), 0); ImageDraw.Draw(mask).rounded_rectangle((60, 60, S-60, S-60), radius=220, fill=255)
-img.putalpha(mask)
-iconset = os.path.join(out, "ClaudeLamp.iconset"); os.makedirs(iconset, exist_ok=True)
-for n in (16, 32, 64, 128, 256, 512, 1024):
-    im = img.resize((n, n), Image.LANCZOS)
-    im.save(os.path.join(iconset, f"icon_{n}x{n}.png"))
-    if n >= 32: im.save(os.path.join(iconset, f"icon_{n//2}x{n//2}@2x.png"))
-print("iconset ok")
-PY
+uv run --quiet --with pillow python3 "$HERE/make_icon.py" "$APP/Contents/Resources"
 iconutil -c icns "$APP/Contents/Resources/ClaudeLamp.iconset" -o "$APP/Contents/Resources/ClaudeLamp.icns"
 rm -rf "$APP/Contents/Resources/ClaudeLamp.iconset"
 rm -rf /Applications/ClaudeLamp.app && cp -R "$APP" /Applications/ClaudeLamp.app
