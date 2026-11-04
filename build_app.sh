@@ -10,7 +10,8 @@ cat > "$APP/Contents/MacOS/ClaudeLamp" <<'SH'
 #!/bin/bash
 RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
-exec uv run --quiet --script "$RES/app.py"
+mkdir -p "$HOME/Library/Logs"
+exec uv run --quiet --script "$RES/app.py" >> "$HOME/Library/Logs/ClaudeLamp.log" 2>&1
 SH
 chmod +x "$APP/Contents/MacOS/ClaudeLamp"
 cat > "$APP/Contents/Info.plist" <<'PL'

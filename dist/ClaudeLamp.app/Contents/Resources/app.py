@@ -262,6 +262,13 @@ class Api:
             await strip.send(db.pack(db.CMD_COLOR, r, g, b, 255), gap=0)
             await asyncio.sleep(0.02)
 
+    def _main_window_visible(self):
+        from AppKit import NSApplication
+        for w in NSApplication.sharedApplication().windows():
+            if w.title() == "ClaudeLamp":
+                return bool(w.isVisible())
+        return False
+
     def open_full(self):
         from Foundation import NSOperationQueue
         from AppKit import NSApplication
@@ -269,6 +276,7 @@ class Api:
         def show():
             if getattr(self, "_hide_pop", None):
                 self._hide_pop()
+            self._own_activate_at = time.monotonic()
             self._main_window.show()
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         NSOperationQueue.mainQueue().addOperationWithBlock_(show)
@@ -362,6 +370,7 @@ def _install_menubar(api, window):
                 api._main_window.hide()                                            # one surface at a time
                 btn = api._status_item.button()
                 pop.showRelativeToRect_ofView_preferredEdge_(btn.bounds(), btn, 1)   # 1 = NSMinYEdge, below the bar
+                api._own_activate_at = time.monotonic()                            # this activation is ours, not a Dock click
                 NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
                 api._pop_web.evaluateJavaScript_completionHandler_("typeof refresh==='function'&&refresh()", None)
             except Exception:
@@ -373,6 +382,17 @@ def _install_menubar(api, window):
 
         def open_(self, sender):
             api.open_full()
+
+        def activated_(self, note):
+            """App became active. Our own activations (popover, open_full) are ignored for a second;
+            anything else is a Dock click or reopen and brings the full window."""
+            if time.monotonic() - getattr(api, "_own_activate_at", 0) < 1.0:
+                return
+            if time.monotonic() - getattr(api, "_install_at", 0) < 3.0:            # launch activation, not a Dock click
+                return
+            print("[menubar] external activation -> full window", file=sys.stderr)
+            if api._popover.isShown() or not api._main_window_visible():
+                api.open_full()
 
     bridge = Bridge.alloc().init()
     cfg = WebKit.WKWebViewConfiguration.alloc().init()
@@ -404,6 +424,9 @@ def _install_menubar(api, window):
         menu.addItem_(mi)
     api._status_item, api._menu_target, api._popover, api._pop_web, api._bridge, api._status_menu = item, target, pop, web, bridge, menu
     api._hide_pop = lambda: pop.close()
+    api._own_activate_at, api._install_at = 0.0, time.monotonic()
+    from Foundation import NSNotificationCenter
+    NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(target, "activated:", "NSApplicationDidBecomeActiveNotification", None)
     print("[menubar] status item + popover installed", file=sys.stderr)
 
 
@@ -411,7 +434,8 @@ def main():
     import webview
     api = Api()
     here = os.path.dirname(os.path.abspath(__file__))
-    window = webview.create_window("ClaudeLamp", url=os.path.join(here, "ui.html"), js_api=api, width=1180, height=760, min_size=(820, 600))
+    window = webview.create_window("ClaudeLamp", url=os.path.join(here, "ui.html"), js_api=api, width=1180, height=760,
+                                   min_size=(820, 600), hidden=True)   # launch goes to the menu bar popover first
     api._main_window = window
 
     def on_closing():
@@ -423,9 +447,8 @@ def main():
     def after_start():
         from PyObjCTools import AppHelper
         AppHelper.callAfter(install_menubar, api, window)
-        if os.environ.get("CLAUDELAMP_SHOW_POPOVER"):      # debug: open the panel as if the bulb was clicked
-            time.sleep(3)
-            AppHelper.callAfter(lambda: api._menu_target.toggle_(api._status_item.button()))
+        time.sleep(1.5)                                     # let the status item lay out, then open the popover
+        AppHelper.callAfter(lambda: api._menu_target.toggle_(api._status_item.button()))
 
     try:
         webview.start(after_start)
