@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["bleak>=0.22", "pywebview>=5"]
+# dependencies = ["bleak>=0.22", "pywebview>=5", "sounddevice>=0.5", "numpy>=1.26"]
 # ///
 """AiLamp desktop app: every DayBetter control for the P065 strip, plus Claude Code status light settings.
 
@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daybetter as db  # noqa: E402
@@ -35,11 +36,52 @@ def save_cfg(cfg):
         json.dump(cfg, f)
 
 
+class AudioMeter:
+    """Default input device -> loudness in 0..1 and a bass-onset flag, updated ~40 times a second."""
+
+    def __init__(self, api):
+        self.api, self.level, self.beat = api, 0.0, False
+        self._avg = 1e-4
+        self._bass_avg = 1e-4
+        self.stream = None
+
+    def start(self):
+        import numpy as np
+        import sounddevice as sd
+        self.np = np
+        self.stream = sd.InputStream(channels=1, samplerate=44100, blocksize=1024, callback=self._cb)
+        self.stream.start()
+
+    def stop(self):
+        if self.stream:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
+
+    def _cb(self, data, frames, t, status):
+        np = self.np
+        x = data[:, 0]
+        rms = float(np.sqrt(np.mean(x * x)) + 1e-9)
+        spec = np.abs(np.fft.rfft(x))
+        bass = float(spec[1:8].mean() + 1e-9)          # roughly 40..300 Hz at 44.1 kHz / 1024
+        gain = 1.0 + self.api.sens / 25.0                # sensitivity slider 1..100 -> gain 1..5
+        self._avg = 0.98 * self._avg + 0.02 * rms
+        self._bass_avg = 0.95 * self._bass_avg + 0.05 * bass
+        lvl = min(1.0, (rms / (self._avg * 2.0 + 1e-6)) * 0.5 * gain * min(1.0, rms * 40 * gain))
+        self.level = 0.6 * self.level + 0.4 * lvl
+        self.api._level = self.level
+        if bass > self._bass_avg * 1.6 and bass > 0.02 / gain:
+            self.beat = True
+
+
 class Api:
     """Methods callable from the page via window.pywebview.api.<name>(...)."""
 
     def __init__(self):
         self.cfg = load_cfg()
+        self.sens = 50
+        self._level = 0.0
+        self._audio = None
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
         self.strip = None
@@ -56,6 +98,7 @@ class Api:
         try:
             req = json.loads((await reader.readline()).decode())
             self._stop_chaos()  # a status change from Claude beats the party
+            self.music_host(False, self.sens)
             await (await self._strip()).send([bytes.fromhex(h) for h in req["frames"]])
             writer.write((json.dumps({"ok": True}) + "\n").encode())
         except Exception as e:
@@ -174,6 +217,55 @@ class Api:
         frames = [db.mode(db.MODE_DEVICE_MIC, int(submode)), db.sensitivity(int(sens)), db.rhythm(bool(on))]
         return self._run(self._send(frames))
 
+    # Music, Mac microphone: Python captures audio, maps it to colour frames, and feeds the level back to the page
+    def music_host(self, on, sens):
+        self.sens = int(sens)
+        if on and not getattr(self, "_audio", None):
+            self._stop_chaos()
+            self._level = 0.0
+            self._audio = AudioMeter(self)
+            try:
+                self._audio.start()
+            except Exception as e:
+                self._audio = None
+                return {"ok": False, "error": f"microphone: {e}"}
+            self._music_task = asyncio.run_coroutine_threadsafe(self._music_loop(), self.loop)
+        elif not on and getattr(self, "_audio", None):
+            self._audio.stop()
+            self._audio = None
+            t = getattr(self, "_music_task", None)
+            if t:
+                t.cancel()
+        return {"ok": True}
+
+    def music_level(self):
+        return float(getattr(self, "_level", 0.0))
+
+    async def _music_loop(self):
+        import colorsys
+        strip = await self._strip()
+        await strip.send([db.switch(True), db.brightness(100)] + db.color(255, 0, 255))
+        hue, last_beat = 0.0, 0.0
+        while True:
+            m = self._audio
+            if m is None:
+                return
+            level = m.level
+            if m.beat and time.monotonic() - last_beat > 0.12:   # new bass hit: jump hue
+                hue = (hue + 0.17 + 0.2 * level) % 1.0
+                last_beat = time.monotonic()
+                m.beat = False
+            else:
+                hue = (hue + 0.002) % 1.0
+            v = 0.12 + 0.88 * level
+            r, g, b = (int(c * 255 * v) for c in colorsys.hsv_to_rgb(hue, 1.0, 1.0))
+            await strip.send(db.pack(db.CMD_COLOR, r, g, b, 255), gap=0)
+            await asyncio.sleep(0.02)
+
+    def log(self, msg):
+        print("[ui]", msg, file=sys.stderr)
+        return True
+
     # Timers
     def timer(self, number, enable, week, hour, minute):
         number, week, hour, minute = int(number), int(week), int(hour), int(minute)
@@ -205,135 +297,13 @@ class Api:
         return {"ok": p.returncode == 0, "error": (p.stderr or p.stdout).strip()}
 
 
-HTML = r"""<!doctype html><html><head><meta charset="utf-8"><title>AiLamp</title>
-<style>
-:root{--bg:#0f1014;--panel:#181a21;--line:#262932;--fg:#e8e9ee;--mut:#8a8f9c;--acc:#7c5cff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,Inter,system-ui,sans-serif}
-header{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
-header h1{font-size:16px;margin:0;font-weight:600}#status{color:var(--mut);font-size:13px;flex:1}
-#dot{width:10px;height:10px;border-radius:50%;background:#333;box-shadow:0 0 12px currentColor}
-nav{display:flex;gap:4px;padding:10px 18px 0}nav button{background:none;border:0;color:var(--mut);padding:8px 12px;border-radius:8px;cursor:pointer;font-size:14px}
-nav button.on{background:var(--panel);color:var(--fg)}
-main{padding:14px 18px 24px}section{display:none}section.on{display:block}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
-.row{display:flex;align-items:center;gap:12px;margin:8px 0}.row label{min-width:110px;color:var(--mut)}
-input[type=range]{flex:1;accent-color:var(--acc)}input[type=color]{width:56px;height:36px;border:0;background:none;padding:0;cursor:pointer}
-input[type=time],input[type=text],select{background:#0f1014;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:14px}
-button.b{background:#23262f;color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 12px;cursor:pointer;font-size:13px}
-button.b:hover{border-color:var(--acc)}button.b.on{background:var(--acc);border-color:var(--acc);color:#fff}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
-.sw{display:flex;gap:8px;flex-wrap:wrap}.sw span{width:30px;height:30px;border-radius:50%;cursor:pointer;border:2px solid transparent}.sw span:hover{border-color:#fff}
-.slots{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.slot{position:relative}.slot b{position:absolute;top:-6px;right:-6px;background:#000;border-radius:50%;width:18px;height:18px;font-size:11px;text-align:center;line-height:18px;cursor:pointer;color:#fff}
-.week{display:flex;gap:4px}.week button{width:38px}
-.err{color:#ff6b6b;font-size:13px;min-height:18px;margin-top:6px}.hint{color:var(--mut);font-size:12.5px}
-.toggle{width:46px;height:26px;border-radius:13px;background:#333;position:relative;cursor:pointer;border:0}.toggle::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}
-.toggle.on{background:#2ecc71}.toggle.on::after{left:23px}
-</style></head><body>
-<header><div id="dot"></div><h1>AiLamp</h1><div id="status">connecting…</div><button class="b" onclick="refresh()">Refresh</button><button id="pw" class="toggle" onclick="togglePower()"></button></header>
-<nav><button class="on" data-t="light">Light</button><button data-t="scenes">Scenes</button><button data-t="diy">DIY</button><button data-t="music">Music</button><button data-t="timer">Timer</button><button data-t="settings">Settings</button></nav>
-<main>
-<section id="light" class="on">
- <div class="card"><div class="row"><label>Brightness</label><input id="bright" type="range" min="1" max="100" value="100"><span id="brightv">100%</span></div></div>
- <div class="card"><div class="row"><label>Colour</label><input id="col" type="color" value="#4b0082"><span id="colv" class="hint">#4b0082</span></div>
-  <div class="sw" id="sw"></div></div>
- <div class="card"><div class="row"><label>White</label><input id="warm" type="range" min="0" max="255" value="128"><span class="hint">cool ⟷ warm</span></div></div>
- <div class="err" id="e-light"></div>
-</section>
-<section id="scenes">
- <div class="card"><div class="row"><label>Party</label><button class="b on" onclick="disco()">Ultimate Disco</button><button class="b on" style="background:#1d4ed8;border-color:#1d4ed8" onclick="police()">Police</button></div>
- <div class="row"><label>Host-driven</label><button id="chaosb" class="b" onclick="chaos()">Chaos (random)</button><button id="policeb" class="b" onclick="policeHost()">Police (blue / white / red)</button></div>
- <p class="hint">Ultimate Disco and Police run inside the strip at its top speed. Host-driven modes push one colour per Bluetooth write, about 13 per second; click again to stop, and stop before using other controls.</p></div>
- <div class="card"><div class="row"><label>Speed</label><input id="speed" type="range" min="1" max="100" value="50"><span id="speedv">50%</span></div>
- <div class="row"><label>Brightness</label><input id="bright2" type="range" min="1" max="100" value="100"><span id="bright2v">100%</span></div></div>
- <div class="card"><div class="grid" id="scenegrid"></div></div><div class="err" id="e-scenes"></div>
-</section>
-<section id="diy">
- <div class="card"><div class="row"><label>Pattern</label><button class="b on" data-p="193">Dynamic</button><button class="b" data-p="194">Breathe</button><button class="b" data-p="195">Strobe</button></div>
- <div class="row"><label>Colours</label><div class="slots" id="slots"></div><button class="b" onclick="addSlot()">+ colour</button><button class="b" onclick="addWhite()">+ white</button></div>
- <div class="row"><label>Speed</label><input id="dspeed" type="range" min="1" max="100" value="50"></div>
- <div class="row"><label>Brightness</label><input id="dbright" type="range" min="1" max="100" value="50"></div>
- <div class="row"><label></label><button class="b on" onclick="sendDiy()">Apply scene</button></div>
- <p class="hint">Strobe only works on firmware that reports scene storage; this strip may ignore it.</p></div><div class="err" id="e-diy"></div>
-</section>
-<section id="music">
- <div class="card"><p class="hint" id="michint">Checking whether this strip has a microphone…</p>
- <div class="row"><label>Style</label><select id="micmode"><option value="0">Classic</option><option value="1">Soft</option><option value="2">Dynamic</option><option value="3">Disco</option></select></div>
- <div class="row"><label>Sensitivity</label><input id="sens" type="range" min="1" max="100" value="50"></div>
- <div class="row"><label></label><button class="b on" onclick="music(true)">Start</button><button class="b" onclick="music(false)">Stop</button></div></div><div class="err" id="e-music"></div>
-</section>
-<section id="timer">
- <div class="card"><h3 style="margin:0 0 8px">Turn on</h3><div class="row"><label>Time</label><input type="time" id="t1" value="07:00"><button id="t1en" class="toggle" onclick="this.classList.toggle('on')"></button></div>
-  <div class="row"><label>Repeat</label><div class="week" id="w1"></div></div><div class="row"><label></label><button class="b on" onclick="saveTimer(1)">Save</button></div></div>
- <div class="card"><h3 style="margin:0 0 8px">Turn off</h3><div class="row"><label>Time</label><input type="time" id="t2" value="23:00"><button id="t2en" class="toggle" onclick="this.classList.toggle('on')"></button></div>
-  <div class="row"><label>Repeat</label><div class="week" id="w2"></div></div><div class="row"><label></label><button class="b on" onclick="saveTimer(2)">Save</button></div></div>
- <p class="hint">No repeat days selected = fire once at the next matching time.</p><div class="err" id="e-timer"></div>
-</section>
-<section id="settings">
- <div class="card"><h3 style="margin:0 0 8px">Strip</h3>
-  <div class="row"><label>BLE name</label><input type="text" id="sname"></div>
-  <div class="row"><label>After power cut</label><select id="pon"><option value="0">Stay off</option><option value="1">Turn on</option><option value="2">Last state</option></select><button class="b" onclick="setPon()">Apply</button></div>
-  <div class="row"><label>DIY RGB index</label><input type="checkbox" id="rgbidx"><span class="hint">tick if DIY scenes come out wrong</span></div></div>
- <div class="card"><h3 style="margin:0 0 8px">Claude Code status light</h3>
-  <div class="row"><label>Idle colour</label><input type="color" id="idle"><span class="hint">shown while Claude works and after the 5 s green</span></div>
-  <div class="row"><label>Try it</label><button class="b" onclick="hook('attention')">Needs you</button><button class="b" onclick="hook('done')">Done</button><button class="b" onclick="hook('working')">Working</button><span id="hookstat" class="hint"></span></div></div>
- <div class="row"><label></label><button class="b on" onclick="saveSettings()">Save settings</button></div>
- <div class="card"><p class="hint" id="raw"></p></div><div class="err" id="e-settings"></div>
-</section>
-</main>
-<script>
-const $=s=>document.querySelector(s);const api=()=>window.pywebview.api;
-let pattern=193, slots=["#ff0000","#00ff00","#0000ff"], weeks={1:0,2:0}, power=false;
-const DAYS=["Mo","Tu","We","Th","Fr","Sa","Su"];
-const SWATCH=["#ff0000","#ff8000","#ffff00","#00ff00","#00ffff","#0000ff","#8000ff","#ff00ff","#ffffff","#4b0082","#ff8c3c","#00ff80"];
-function err(id,r){$('#'+id).textContent=r&&r.ok===false?r.error:'';}
-function call(id,fn){return fn().then(r=>{err(id,r);return r;}).catch(e=>{$('#'+id).textContent=String(e);});}
-function throttle(fn,ms){let t,last=0,a;return(...args)=>{a=args;const now=Date.now();if(now-last>=ms){last=now;fn(...a);}else{clearTimeout(t);t=setTimeout(()=>{last=Date.now();fn(...a);},ms-(now-last));}};}
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button,section').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#'+b.dataset.t).classList.add('on');});
-function setPower(on){power=on;$('#pw').classList.toggle('on',on);$('#dot').style.background=on?$('#col').value:'#333';$('#dot').style.color=on?$('#col').value:'#000';}
-function togglePower(){setPower(!power);call('e-light',()=>api().power(power));}
-const sendBright=throttle(v=>call('e-light',()=>api().brightness(v)),150);
-['bright','bright2'].forEach(id=>{$('#'+id).oninput=e=>{$('#'+id+'v').textContent=e.target.value+'%';$('#bright').value=$('#bright2').value=e.target.value;sendBright(e.target.value);};});
-const sendColor=throttle(v=>{setPower(true);call('e-light',()=>api().color(v));},150);
-$('#col').oninput=e=>{$('#colv').textContent=e.target.value;sendColor(e.target.value);};
-SWATCH.forEach(c=>{const s=document.createElement('span');s.style.background=c;s.onclick=()=>{$('#col').value=c;$('#colv').textContent=c;sendColor(c);};$('#sw').appendChild(s);});
-const sendWarm=throttle(v=>call('e-light',()=>api().white(v)),150);$('#warm').oninput=e=>sendWarm(e.target.value);
-const sendSpeed=throttle(v=>call('e-scenes',()=>api().speed(v)),150);$('#speed').oninput=e=>{$('#speedv').textContent=e.target.value+'%';sendSpeed(e.target.value);};
-let hostMode=null; // 'chaos' | 'police' | null
-function hostOff(){hostMode=null;$('#chaosb').classList.remove('on');$('#policeb').classList.remove('on');}
-function firmwareMode(fn){hostOff();setPower(true);$('#speed').value=100;$('#speedv').textContent='100%';document.querySelectorAll('#scenegrid .b').forEach(b=>b.classList.remove('on'));call('e-scenes',fn);}
-function disco(){firmwareMode(()=>api().disco());}
-function police(){firmwareMode(()=>api().police());}
-function hostToggle(which,btn,palette){const on=hostMode!==which;hostOff();if(on){hostMode=which;$(btn).classList.add('on');}setPower(true);call('e-scenes',()=>api().chaos(on,palette));}
-function chaos(){hostToggle('chaos','#chaosb',null);}
-function policeHost(){hostToggle('police','#policeb',['#0000ff','#ffffff','#ff0000']);}
-function buildScenes(list){const g=$('#scenegrid');g.innerHTML='';list.forEach(s=>{const b=document.createElement('button');b.className='b';b.textContent=s.name+(s.animated?'':' ·');b.onclick=()=>{document.querySelectorAll('#scenegrid .b').forEach(x=>x.classList.remove('on'));b.classList.add('on');setPower(true);call('e-scenes',()=>api().scene(s.id));};g.appendChild(b);});}
-document.querySelectorAll('#diy [data-p]').forEach(b=>b.onclick=()=>{document.querySelectorAll('#diy [data-p]').forEach(x=>x.classList.remove('on'));b.classList.add('on');pattern=+b.dataset.p;});
-function renderSlots(){const h=$('#slots');h.innerHTML='';slots.forEach((c,i)=>{const d=document.createElement('div');d.className='slot';if(typeof c==='string'){const inp=document.createElement('input');inp.type='color';inp.value=c;inp.oninput=e=>slots[i]=e.target.value;d.appendChild(inp);}else{const inp=document.createElement('input');inp.type='range';inp.min=0;inp.max=255;inp.value=c;inp.style.width='90px';inp.title='white warmth';inp.oninput=e=>slots[i]=+e.target.value;d.appendChild(inp);}const x=document.createElement('b');x.textContent='×';x.onclick=()=>{slots.splice(i,1);renderSlots();};d.appendChild(x);h.appendChild(d);});}
-function addSlot(){if(slots.length<8)slots.push('#ffffff');renderSlots();}function addWhite(){if(slots.length<8)slots.push(128);renderSlots();}
-function sendDiy(){if(!slots.length)return;setPower(true);call('e-diy',()=>api().diy(slots,pattern,$('#dbright').value,$('#dspeed').value));}
-function music(on){call('e-music',()=>api().music(on,$('#micmode').value,$('#sens').value));}
-function buildWeek(n){const w=$('#w'+n);w.innerHTML='';DAYS.forEach((d,i)=>{const b=document.createElement('button');b.className='b';b.textContent=d;b.onclick=()=>{weeks[n]^=(1<<i);b.classList.toggle('on',!!(weeks[n]&(1<<i)));};w.appendChild(b);});}
-function setWeek(n,mask){weeks[n]=mask&0x7f;[...$('#w'+n).children].forEach((b,i)=>b.classList.toggle('on',!!(weeks[n]&(1<<i))));}
-function saveTimer(n){const [h,m]=$('#t'+n).value.split(':').map(Number);call('e-timer',()=>api().timer(n,$('#t'+n+'en').classList.contains('on'),weeks[n],h,m));}
-function setPon(){call('e-settings',()=>api().power_on($('#pon').value));}
-function saveSettings(){call('e-settings',()=>api().set_settings($('#sname').value,$('#idle').value,$('#rgbidx').checked));}
-function hook(w){$('#hookstat').textContent='…';api().hook_test(w).then(r=>{$('#hookstat').textContent=r.ok?'sent':r.error;});}
-function applyState(s){setPower(s.on);$('#bright').value=$('#bright2').value=s.bright;$('#brightv').textContent=$('#bright2v').textContent=s.bright+'%';$('#speed').value=s.speed;$('#speedv').textContent=s.speed+'%';$('#sens').value=s.sensitivity;
- if(s.mode===1){$('#col').value=s.rgb;$('#colv').textContent=s.rgb;}if(s.mode===0)$('#warm').value=s.w;
- document.querySelectorAll('#scenegrid .b').forEach(b=>b.classList.remove('on'));
- $('#status').textContent=s.label;$('#michint').textContent=s.device_mic?'Built-in microphone detected.':'This strip reports no built-in microphone. Music mode is sent anyway but may do nothing.';
- if(s.power_on!==null&&s.power_on!==undefined)$('#pon').value=s.power_on;
- (s.timers||[]).forEach(t=>{const n=t.number;if(n!==1&&n!==2)return;$('#t'+n).value=String(t.hour).padStart(2,'0')+':'+String(t.minute).padStart(2,'0');$('#t'+n+'en').classList.toggle('on',t.enable);setWeek(n,t.week&0x80?0:t.week);});
- $('#raw').textContent='state frame: '+s.raw;}
-function refresh(){$('#status').textContent='reading…';api().get_state().then(r=>{if(r.ok)applyState(r.result);else $('#status').textContent=r.error;});}
-window.addEventListener('pywebviewready',()=>{buildWeek(1);buildWeek(2);renderSlots();api().scenes().then(buildScenes);api().get_settings().then(s=>{$('#sname').value=s.name;$('#idle').value='#'+s.idle;$('#rgbidx').checked=s.diy_rgb_index;});refresh();});
-</script></body></html>"""
 
 
 def main():
     import webview
     api = Api()
-    webview.create_window("AiLamp", html=HTML, js_api=api, width=760, height=720, min_size=(640, 560))
+    ui = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
+    webview.create_window("AiLamp", url=ui, js_api=api, width=1180, height=760, min_size=(820, 600))
     try:
         webview.start()
     finally:
