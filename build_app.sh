@@ -5,7 +5,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$HERE/dist/ClaudeLamp.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$HERE"/app.py "$HERE"/daybetter.py "$HERE"/ui.html "$APP/Contents/Resources/"
+cp "$HERE"/app.py "$HERE"/daybetter.py "$HERE"/ui.html "$HERE"/popover.html "$APP/Contents/Resources/"
 cat > "$APP/Contents/MacOS/ClaudeLamp" <<'SH'
 #!/bin/bash
 RES="$(cd "$(dirname "$0")/../Resources" && pwd)"

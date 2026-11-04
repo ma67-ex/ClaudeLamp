@@ -262,6 +262,21 @@ class Api:
             await strip.send(db.pack(db.CMD_COLOR, r, g, b, 255), gap=0)
             await asyncio.sleep(0.02)
 
+    def open_full(self):
+        from Foundation import NSOperationQueue
+        from AppKit import NSApplication
+
+        def show():
+            if getattr(self, "_hide_pop", None):
+                self._hide_pop()
+            self._main_window.show()
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        NSOperationQueue.mainQueue().addOperationWithBlock_(show)
+        return True
+
+    def quit_app(self):
+        os._exit(0)
+
     def log(self, msg):
         print("[ui]", msg, file=sys.stderr)
         return True
@@ -299,90 +314,104 @@ class Api:
 
 
 
-# ---------- menu bar (macOS status item) ----------
-MENU = [
-    ("Open ClaudeLamp", "open"), None,
-    ("Power on", "on"), ("Power off", "off"), None,
-    ("Purple", "c:4b0082"), ("Red", "c:ff0000"), ("Blue", "c:0040ff"), ("Green", "c:00ff40"),
-    ("Pink", "c:ff2bd6"), ("White", "c:ffffff"), ("Warm white", "w:220"), None,
-    ("Brightness 100%", "b:100"), ("Brightness 50%", "b:50"), ("Brightness 20%", "b:20"), None,
-    ("Ultimate Disco", "disco"), ("Police", "police"), ("Seven-colour Gradient", "s:12"), ("Purple Breath", "s:18"), None,
-    ("Off in 15 min", "t:15"), ("Off in 30 min", "t:30"), ("Off in 1 hour", "t:60"), ("Cancel off timer", "t:0"), None,
-    ("Quit ClaudeLamp", "quit"),
-]
+# ---------- menu bar: status item + native NSPopover holding a WKWebView ----------
+POP_W, POP_H = 372, 640
 
 
 def install_menubar(api, window):
-    """NSStatusItem with a preset menu. Must run on the main (Cocoa) thread."""
-    import datetime
+    try:
+        _install_menubar(api, window)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+
+
+def _install_menubar(api, window):
+    """Bulb in the menu bar. Click opens a transient NSPopover whose content is popover.html in a WKWebView.
+    The page calls Python through window.webkit.messageHandlers.api; replies come back via __reply(id, json)."""
     import objc
-    from AppKit import NSImage, NSMenu, NSMenuItem, NSObject, NSStatusBar, NSVariableStatusItemLength, NSApplication
+    from AppKit import (NSImage, NSMenu, NSMenuItem, NSObject, NSStatusBar, NSVariableStatusItemLength, NSApplication,
+                        NSPopover, NSViewController, NSAppearance, NSMakeRect, NSEvent)
+    from Foundation import NSURL, NSOperationQueue
+    import WebKit
+
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    class Bridge(NSObject):
+        def userContentController_didReceiveScriptMessage_(self, ucc, msg):
+            body = msg.body()
+            call_id, method, args = body["id"], body["method"], list(body.get("args") or [])
+
+            def work():
+                try:
+                    result = getattr(api, method)(*args)
+                    payload = json.dumps({"ok": True, "result": result})
+                except Exception as e:
+                    payload = json.dumps({"ok": False, "error": str(e)})
+                NSOperationQueue.mainQueue().addOperationWithBlock_(
+                    lambda: api._pop_web.evaluateJavaScript_completionHandler_(f"__reply({int(call_id)},{payload})", None))
+            threading.Thread(target=work, daemon=True).start()
 
     class Target(NSObject):
-        def act_(self, sender):
-            tag = sender.representedObject()
-            threading.Thread(target=run_action, args=(tag,), daemon=True).start()
+        def toggle_(self, sender):
+            try:
+                pop = api._popover
+                if pop.isShown():
+                    pop.close()
+                    return
+                btn = api._status_item.button()
+                pop.showRelativeToRect_ofView_preferredEdge_(btn.bounds(), btn, 1)   # 1 = NSMinYEdge, below the bar
+                NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+                api._pop_web.evaluateJavaScript_completionHandler_("typeof refresh==='function'&&refresh()", None)
+            except Exception:
+                import traceback
+                traceback.print_exc()
 
-    def run_action(tag):
-        try:
-            if tag == "open":
-                from Foundation import NSOperationQueue
-                NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: (window.show(), NSApplication.sharedApplication().activateIgnoringOtherApps_(True)))
-            elif tag == "quit":
-                os._exit(0)
-            elif tag == "on":
-                api.power(True)
-            elif tag == "off":
-                api.power(False)
-            elif tag.startswith("c:"):
-                api.power(True); api.color(tag[2:])
-            elif tag.startswith("w:"):
-                api.power(True); api.white(int(tag[2:]))
-            elif tag.startswith("b:"):
-                api.brightness(int(tag[2:]))
-            elif tag.startswith("s:"):
-                api.power(True); api.scene(int(tag[2:]))
-            elif tag == "disco":
-                api.disco()
-            elif tag == "police":
-                api.police()
-            elif tag.startswith("t:"):
-                mins = int(tag[2:])
-                if mins == 0:
-                    api.timer(2, False, 0x80, 0, 0)
-                else:
-                    when = datetime.datetime.now() + datetime.timedelta(minutes=mins)
-                    api.timer(2, True, 0, when.hour, when.minute)
-        except Exception as e:
-            print("[menu]", tag, e, file=sys.stderr)
+        def quit_(self, sender):
+            os._exit(0)
+
+        def open_(self, sender):
+            api.open_full()
+
+    bridge = Bridge.alloc().init()
+    cfg = WebKit.WKWebViewConfiguration.alloc().init()
+    cfg.userContentController().addScriptMessageHandler_name_(bridge, "api")
+    web = WebKit.WKWebView.alloc().initWithFrame_configuration_(NSMakeRect(0, 0, POP_W, POP_H), cfg)
+    web.setValue_forKey_(False, "drawsBackground")
+    web.loadFileURL_allowingReadAccessToURL_(NSURL.fileURLWithPath_(os.path.join(here, "popover.html")), NSURL.fileURLWithPath_(here))
+    vc = NSViewController.alloc().init()
+    vc.setView_(web)
+    pop = NSPopover.alloc().init()
+    pop.setContentViewController_(vc)
+    pop.setContentSize_((POP_W, POP_H))
+    pop.setBehavior_(1)                                                  # transient: closes on outside click
+    pop.setAnimates_(True)
+    pop.setAppearance_(NSAppearance.appearanceNamed_("NSAppearanceNameVibrantDark"))
 
     target = Target.alloc().init()
-    menu = NSMenu.alloc().init()
-    for entry in MENU:
-        if entry is None:
-            menu.addItem_(NSMenuItem.separatorItem())
-            continue
-        title, tag = entry
-        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, "act:", "")
-        item.setTarget_(target)
-        item.setRepresentedObject_(tag)
-        menu.addItem_(item)
     item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
-    icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("lightbulb.led.fill", "ClaudeLamp")
-    if icon is None:
-        icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("lightbulb.fill", "ClaudeLamp")
+    icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("lightbulb.led.fill", "ClaudeLamp") \
+        or NSImage.imageWithSystemSymbolName_accessibilityDescription_("lightbulb.fill", "ClaudeLamp")
     icon.setTemplate_(True)
     item.button().setImage_(icon)
-    item.setMenu_(menu)
-    api._status_item = item   # keep a reference or Cocoa releases it
-    api._menu_target = target
+    item.button().setTarget_(target)
+    item.button().setAction_("toggle:")
+    menu = NSMenu.alloc().init()                                         # kept for a right-click fallback
+    for title, sel in (("Open ClaudeLamp", "open:"), ("Quit ClaudeLamp", "quit:")):
+        mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, sel, "")
+        mi.setTarget_(target)
+        menu.addItem_(mi)
+    api._status_item, api._menu_target, api._popover, api._pop_web, api._bridge, api._status_menu = item, target, pop, web, bridge, menu
+    api._hide_pop = lambda: pop.close()
+    print("[menubar] status item + popover installed", file=sys.stderr)
 
 
 def main():
     import webview
     api = Api()
-    ui = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
-    window = webview.create_window("ClaudeLamp", url=ui, js_api=api, width=1180, height=760, min_size=(820, 600))
+    here = os.path.dirname(os.path.abspath(__file__))
+    window = webview.create_window("ClaudeLamp", url=os.path.join(here, "ui.html"), js_api=api, width=1180, height=760, min_size=(820, 600))
+    api._main_window = window
 
     def on_closing():
         window.hide()      # closing the window keeps the app alive in the menu bar
@@ -393,6 +422,9 @@ def main():
     def after_start():
         from PyObjCTools import AppHelper
         AppHelper.callAfter(install_menubar, api, window)
+        if os.environ.get("CLAUDELAMP_SHOW_POPOVER"):      # debug: open the panel as if the bulb was clicked
+            time.sleep(3)
+            AppHelper.callAfter(lambda: api._menu_target.toggle_(api._status_item.button()))
 
     try:
         webview.start(after_start)
