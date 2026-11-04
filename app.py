@@ -147,6 +147,12 @@ class Api:
         return self._run(self._state())
 
     def power(self, on):
+        cfg = load_cfg()                                   # the hook script pauses while the strip is deliberately off
+        if on:
+            cfg.pop("sleep", None)
+        else:
+            cfg["sleep"] = True
+        save_cfg(cfg)
         return self._run(self._send(db.switch(bool(on))))
 
     def brightness(self, pct):

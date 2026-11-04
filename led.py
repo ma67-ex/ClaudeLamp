@@ -227,6 +227,10 @@ def main(argv):
     with open(STATE + ".lock", "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
         st = load()
+        if st.get("sleep") and cmd in ("working", "attention", "done", "unattention", "restore"):
+            return                                   # strip was switched off on purpose; hooks stay quiet until "on"
+        if cmd in ("on", "set", "idle"):
+            st.pop("sleep", None)
         if cmd == "idle":
             st["idle"] = argv[2].lower()
             st["effects"]["working"] = {"type": "off" if st["idle"] == "off" else "colour", "rgb": st["idle"]}
@@ -262,6 +266,7 @@ def main(argv):
         elif cmd == "off":
             send(st["name"], "off", None)
             st["mode"] = "idle"
+            st["sleep"] = True
         else:
             sys.exit(__doc__)
         save(st)
