@@ -175,3 +175,14 @@ While the app runs it listens on the unix socket `~/.claude/ailamp.sock`. `led.p
 - `set RRGGBB` also updates `idle`. Run `idle RRGGBB` afterwards if you only wanted a temporary colour.
 - Multiple Claude sessions share one strip and one state file. The last hook wins.
 - Adapting to another strip: run `scan`, then connect and dump characteristics. If you see `fff3`, it is ELK-BLEDOM and already supported. If you see one write and one notify characteristic under a vendor service, try the `A0` frames and look for an `A1` ACK. Anything else needs a BLE sniff of the vendor app (Android `btsnoop_hci.log`, or macOS PacketLogger with an iPhone).
+
+## 8. Multi-colour segments: not possible on P065
+
+Tested on hardware on 2026-11-04. The strip is single-zone: every LED shows the same colour. What was tried:
+
+- Colour frame with an index byte (`A0 15 07 r g b FF idx 00`): whole strip changes, index ignored. In the app this index is the preset slot, not a position.
+- DIY (`A3`) with the "RGB index" flag and a position byte per colour: accepted (state reports DIY mode) but plays one colour at a time.
+- DIY2 (`A4`, modes 224..235 from `Diy2CommandUtil`): the strip ignores the frames; the state byte does not change. `daybetter.diy2()` is kept for addressable products.
+- Payloads above about 40 bytes (15 colours, 8 chunks) made the controller drop the link and go off-air until power-cycled. Keep DIY colour lists to 8 or fewer.
+
+Segments need an addressable (RGBIC) strip. For those, `diy()`/`diy2()` with `rgb_index=True` and an `indices` list is the place to start.

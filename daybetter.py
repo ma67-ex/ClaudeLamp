@@ -161,6 +161,42 @@ def diy(colors: list[tuple[int, int, int] | int], pattern: int = DIY_DYNAMIC, br
     return out
 
 
+# DIY2 (cmd A4): richer custom effects, whole strip. Mode ids from BulbDiy2Constants; config is always 5 bytes.
+CMD_DIY2 = 0xA4
+DIY2 = {"jump": 224, "flash": 225, "flash01": 226, "breathe": 227, "twinkle": 228, "breathe01": 229,
+        "breathe02": 230, "gradient": 231, "gradient01": 232, "relay": 233, "ripple": 234, "swing": 235}
+DIY2_REFRESH = 100  # PIRDeviceCommand.LIGHT_PIR_REFRESH_VALUE, placeholder byte used by the breathe family
+
+
+def diy2(mode: int, colors: list[tuple[int, int, int] | int], speed: int = 50, bright: int = 100,
+         extra: tuple[int, ...] = (), rgb_index: bool = False, indices: list[int] | None = None) -> list[bytes]:
+    """Custom scene v2. extra = the mode's remaining config values (stay, black time, repeat ...).
+    With rgb_index every colour carries an index byte (its position on an addressable strip).
+    Chunks: A0 A4 <len> <i+1> <total> <i> <rgb_index> <11 bytes> crc (Diy2CommandUtil.packCustomScene)."""
+    cfg = [speed, bright, *extra]
+    if mode in (227, 229, 230):           # breathe family: speed, placeholder, then the rest
+        cfg = [speed, DIY2_REFRESH, bright, *extra]
+    elif mode == 228:                     # twinkle: 0, placeholder, spark, fade, interval
+        cfg = [0, DIY2_REFRESH, *extra]
+    cfg = (cfg + [0] * 5)[:5]
+    data = [mode, *cfg]
+    for n, c in enumerate(colors):
+        if isinstance(c, int):
+            data += [0xFF, 0xFF, 0xFF, c & 0xFF]
+        else:
+            data += [c[0], c[1], c[2], DIY_RGB_MARKER]
+        if rgb_index:
+            data.append((indices[n] if indices else n) & 0xFF)
+    if rgb_index:
+        data.append(0)
+    chunks = [data[i:i + 11] for i in range(0, len(data), 11)]
+    out = []
+    for i, chunk in enumerate(chunks):
+        body = bytes([0xA0, CMD_DIY2, len(chunk) + 7, i + 1, len(chunks), i, 1 if rgb_index else 0, *chunk])
+        out.append(body + crc16_modbus(body))
+    return out
+
+
 @dataclass
 class State:
     on: bool = False
@@ -339,4 +375,6 @@ if __name__ == "__main__":
     frames = diy([(255, 0, 0), (0, 0, 255)], DIY_BREATHE, 50, 50)
     assert frames[0][:6].hex() == "a0a312010100" and len(frames) == 1, frames
     assert once_week(0, 0) & 0x80
+    f2 = diy2(DIY2["relay"], [(255, 0, 0), (0, 0, 255)], 100, 100, (50,))
+    assert f2[0][:13].hex() == "a0a41201020000" + "e9646432" + "0000", f2[0].hex()
     print("daybetter selftest ok")
