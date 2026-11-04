@@ -1,4 +1,4 @@
-# AiLamp
+# ClaudeLamp
 
 Turn a cheap Bluetooth LED strip into a status light for Claude Code.
 
@@ -24,20 +24,20 @@ Every control the DayBetter phone app offers for this strip, from the Mac:
 - Timer: daily or one-shot turn-on and turn-off timers with weekday repeat
 - Settings: behaviour after a power cut, BLE name, Claude idle colour, and buttons to try the red / green / restore hooks
 
-While the app is open it owns the Bluetooth connection, and the hook script hands its commands to the app over a local socket (`~/.claude/ailamp.sock`), so Claude's status light keeps working.
+While the app is open it owns the Bluetooth connection, and the hook script hands its commands to the app over a local socket (`~/.claude/claudelamp.sock`), so Claude's status light keeps working.
 
-![AiLamp settings tab](docs/app.png)
+![ClaudeLamp settings tab](docs/app.png)
 
 ## Install
 
 ```bash
 brew install uv            # if you do not have it
-git clone https://github.com/ma67-ex/AiLamp
-cd AiLamp
+git clone https://github.com/ma67-ex/ClaudeLamp
+cd ClaudeLamp
 ./install.sh P065_17F3 ff8c3c   # <BLE name> <idle colour hex>
 ```
 
-The installer copies `led.py` to `~/.claude/scripts/`, writes `~/.claude/led-state.json`, and merges `hooks.json` into `~/.claude/settings.json` (your old settings are backed up to `settings.json.bak-ailamp`).
+The installer copies `led.py` to `~/.claude/scripts/`, writes `~/.claude/led-state.json`, and merges `hooks.json` into `~/.claude/settings.json` (your old settings are backed up to `settings.json.bak-claudelamp`).
 
 Find your strip's BLE name with:
 

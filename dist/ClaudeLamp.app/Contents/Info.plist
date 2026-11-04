@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>ClaudeLamp</string>
+  <key>CFBundleDisplayName</key><string>ClaudeLamp</string>
+  <key>CFBundleIdentifier</key><string>dev.ma67.claudelamp</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleExecutable</key><string>ClaudeLamp</string>
+  <key>CFBundleIconFile</key><string>ClaudeLamp</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>ClaudeLamp talks to your LED strip over Bluetooth.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Music mode listens to the room and drives the strip.</string>
+</dict></plist>

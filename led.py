@@ -13,12 +13,12 @@
   led.py set RRGGBB | idle RRGGBB|off | on | off | scan
 
 State + config: ~/.claude/led-state.json  {"name": "P065_17F3", "idle": "4b0082", "mode": "idle"}
-If the AiLamp desktop app is running it owns the Bluetooth link; frames are handed to it over ~/.claude/ailamp.sock.
+If the ClaudeLamp desktop app is running it owns the Bluetooth link; frames are handed to it over ~/.claude/claudelamp.sock.
 """
 import asyncio, fcntl, json, os, sys, time
 
 STATE = os.path.expanduser("~/.claude/led-state.json")
-SOCK = os.path.expanduser("~/.claude/ailamp.sock")
+SOCK = os.path.expanduser("~/.claude/claudelamp.sock")
 DEFAULT = {"name": "P065_17F3", "idle": "4b0082", "mode": "idle"}
 GREEN_SECONDS = 5
 

@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["bleak>=0.22", "pywebview>=5", "sounddevice>=0.5", "numpy>=1.26"]
 # ///
-"""AiLamp desktop app: every DayBetter control for the P065 strip, plus Claude Code status light settings.
+"""ClaudeLamp desktop app: every DayBetter control for the P065 strip, plus Claude Code status light settings.
 
 Run:  ./app.py        (needs uv; first start downloads bleak + pywebview)
 """
@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daybetter as db  # noqa: E402
 
 STATE = os.path.expanduser("~/.claude/led-state.json")
-SOCK = os.path.expanduser("~/.claude/ailamp.sock")  # led.py hooks talk to the running app through this
+SOCK = os.path.expanduser("~/.claude/claudelamp.sock")  # led.py hooks talk to the running app through this
 LED_PY = os.path.expanduser("~/.claude/scripts/led.py")
 
 
@@ -299,13 +299,103 @@ class Api:
 
 
 
+# ---------- menu bar (macOS status item) ----------
+MENU = [
+    ("Open ClaudeLamp", "open"), None,
+    ("Power on", "on"), ("Power off", "off"), None,
+    ("Purple", "c:4b0082"), ("Red", "c:ff0000"), ("Blue", "c:0040ff"), ("Green", "c:00ff40"),
+    ("Pink", "c:ff2bd6"), ("White", "c:ffffff"), ("Warm white", "w:220"), None,
+    ("Brightness 100%", "b:100"), ("Brightness 50%", "b:50"), ("Brightness 20%", "b:20"), None,
+    ("Ultimate Disco", "disco"), ("Police", "police"), ("Seven-colour Gradient", "s:12"), ("Purple Breath", "s:18"), None,
+    ("Off in 15 min", "t:15"), ("Off in 30 min", "t:30"), ("Off in 1 hour", "t:60"), ("Cancel off timer", "t:0"), None,
+    ("Quit ClaudeLamp", "quit"),
+]
+
+
+def install_menubar(api, window):
+    """NSStatusItem with a preset menu. Must run on the main (Cocoa) thread."""
+    import datetime
+    import objc
+    from AppKit import NSImage, NSMenu, NSMenuItem, NSObject, NSStatusBar, NSVariableStatusItemLength, NSApplication
+
+    class Target(NSObject):
+        def act_(self, sender):
+            tag = sender.representedObject()
+            threading.Thread(target=run_action, args=(tag,), daemon=True).start()
+
+    def run_action(tag):
+        try:
+            if tag == "open":
+                from Foundation import NSOperationQueue
+                NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: (window.show(), NSApplication.sharedApplication().activateIgnoringOtherApps_(True)))
+            elif tag == "quit":
+                os._exit(0)
+            elif tag == "on":
+                api.power(True)
+            elif tag == "off":
+                api.power(False)
+            elif tag.startswith("c:"):
+                api.power(True); api.color(tag[2:])
+            elif tag.startswith("w:"):
+                api.power(True); api.white(int(tag[2:]))
+            elif tag.startswith("b:"):
+                api.brightness(int(tag[2:]))
+            elif tag.startswith("s:"):
+                api.power(True); api.scene(int(tag[2:]))
+            elif tag == "disco":
+                api.disco()
+            elif tag == "police":
+                api.police()
+            elif tag.startswith("t:"):
+                mins = int(tag[2:])
+                if mins == 0:
+                    api.timer(2, False, 0x80, 0, 0)
+                else:
+                    when = datetime.datetime.now() + datetime.timedelta(minutes=mins)
+                    api.timer(2, True, 0, when.hour, when.minute)
+        except Exception as e:
+            print("[menu]", tag, e, file=sys.stderr)
+
+    target = Target.alloc().init()
+    menu = NSMenu.alloc().init()
+    for entry in MENU:
+        if entry is None:
+            menu.addItem_(NSMenuItem.separatorItem())
+            continue
+        title, tag = entry
+        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, "act:", "")
+        item.setTarget_(target)
+        item.setRepresentedObject_(tag)
+        menu.addItem_(item)
+    item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
+    icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("lightbulb.led.fill", "ClaudeLamp")
+    if icon is None:
+        icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("lightbulb.fill", "ClaudeLamp")
+    icon.setTemplate_(True)
+    item.button().setImage_(icon)
+    item.setMenu_(menu)
+    api._status_item = item   # keep a reference or Cocoa releases it
+    api._menu_target = target
+
+
 def main():
     import webview
     api = Api()
     ui = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
-    webview.create_window("AiLamp", url=ui, js_api=api, width=1180, height=760, min_size=(820, 600))
+    window = webview.create_window("ClaudeLamp", url=ui, js_api=api, width=1180, height=760, min_size=(820, 600))
+
+    def on_closing():
+        window.hide()      # closing the window keeps the app alive in the menu bar
+        return False
+
+    window.events.closing += on_closing
+
+    def after_start():
+        from PyObjCTools import AppHelper
+        AppHelper.callAfter(install_menubar, api, window)
+
     try:
-        webview.start()
+        webview.start(after_start)
     finally:
         if os.path.exists(SOCK):
             os.remove(SOCK)

@@ -1,4 +1,4 @@
-# PLAN.md: rebuild AiLamp from scratch
+# PLAN.md: rebuild ClaudeLamp from scratch
 
 This document is written for an AI agent or a developer who has never seen this project. Follow it top to bottom and you will have a Bluetooth LED strip that mirrors Claude Code's state within a few minutes. Everything that was learned while building the first version is recorded here, including the dead ends, so you do not repeat them.
 
@@ -155,7 +155,7 @@ Attention = DayBetter scene `0x18` (Red Strobe) with speed 100, or ELK effect `0
 
 `daybetter.py` holds the protocol (frame builders, state parser, scene table) and `Strip`, an async bleak client that disconnects after 3 s idle. Every public `Strip` call and the idle watcher take one `asyncio.Lock`, otherwise the watcher can drop the link in the middle of a write ("disconnected" errors). `app.py` is a pywebview window (WKWebView, HTML inline) whose JavaScript calls Python methods on `Api`. BLE work runs on one asyncio loop in a background thread, serialised by an `asyncio.Lock`.
 
-While the app runs it listens on the unix socket `~/.claude/ailamp.sock`. `led.py` checks for that socket first and, if present, sends `{"frames": [hex, ...]}` as one JSON line; the app writes the frames on its own connection. All protocol logic stays in `led.py`. That avoids two processes fighting over one peripheral and a deadlock that appeared when both also shared the file lock: the hook holds the lock while it waits for the app, so the app must never take it.
+While the app runs it listens on the unix socket `~/.claude/claudelamp.sock`. `led.py` checks for that socket first and, if present, sends `{"frames": [hex, ...]}` as one JSON line; the app writes the frames on its own connection. All protocol logic stays in `led.py`. That avoids two processes fighting over one peripheral and a deadlock that appeared when both also shared the file lock: the hook holds the lock while it waits for the app, so the app must never take it.
 
 ## 6. Install steps for a fresh machine
 

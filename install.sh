@@ -16,7 +16,7 @@ chmod +x ~/.claude/scripts/led.py
 [ -f ~/.claude/led-state.json ] || printf '{"name": "%s", "idle": "%s", "mode": "idle"}\n' "$NAME" "$IDLE" > ~/.claude/led-state.json
 
 [ -f ~/.claude/settings.json ] || echo '{}' > ~/.claude/settings.json
-cp ~/.claude/settings.json ~/.claude/settings.json.bak-ailamp
+cp ~/.claude/settings.json ~/.claude/settings.json.bak-claudelamp
 python3 - "$HERE/hooks.json" <<'PY'
 import json, os, sys
 settings_path = os.path.expanduser("~/.claude/settings.json")

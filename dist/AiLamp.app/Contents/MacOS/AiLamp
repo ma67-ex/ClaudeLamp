@@ -1,0 +1,4 @@
+#!/bin/bash
+RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+exec uv run --quiet --script "$RES/app.py"

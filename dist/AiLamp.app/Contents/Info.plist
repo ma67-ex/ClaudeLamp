@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>AiLamp</string>
+  <key>CFBundleDisplayName</key><string>AiLamp</string>
+  <key>CFBundleIdentifier</key><string>dev.ma67.ailamp</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleExecutable</key><string>AiLamp</string>
+  <key>CFBundleIconFile</key><string>AiLamp</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>AiLamp talks to your LED strip over Bluetooth.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Music mode listens to the room and drives the strip.</string>
+</dict></plist>
