@@ -7,7 +7,7 @@
 
   led.py working        idle colour (Claude is busy)             UserPromptSubmit, after a permission is granted
   led.py attention      red strobe at max speed (Claude waits)   AskUserQuestion, permission prompt
-  led.py done           green for 5 s, then idle colour          Stop. Reads the hook JSON on stdin; if Claude's
+  led.py done           green strobe (max speed) for 5 s, then idle          Stop. Reads the hook JSON on stdin; if Claude's
                                                                  last message ends with "?", shows attention instead
   led.py unattention    idle colour, only if currently attention PostToolUse (permission was granted)
   led.py set RRGGBB | idle RRGGBB|off | on | off | scan
@@ -20,7 +20,7 @@ import asyncio, fcntl, json, os, sys, time
 STATE = os.path.expanduser("~/.claude/led-state.json")
 SOCK = os.path.expanduser("~/.claude/ailamp.sock")
 DEFAULT = {"name": "P065_17F3", "idle": "4b0082", "mode": "idle"}
-GREEN, GREEN_SECONDS = "00ff00", 5
+GREEN_SECONDS = 5
 
 # Protocol A: ELK-BLEDOM / MELK family. Service fff0, write char fff3, frames 7e..ef.
 ELK_CHAR = "0000fff3-0000-1000-8000-00805f9b34fb"
@@ -50,11 +50,17 @@ def frames(proto: str, cmd: str, rgb: str | None) -> list[bytes]:
         on = bytes.fromhex("7e00040100000000ef")
         if cmd == "attention":
             return [on, bytes.fromhex("7e00039603000000ef"), bytes.fromhex("7e00026400000000ef")]  # blink_r, speed 100
+        if cmd == "done":
+            return [on, bytes.fromhex("7e00039703000000ef"), bytes.fromhex("7e00026400000000ef")]  # blink_g, speed 100
         return [on, bytes.fromhex("7e000503" + rgb + "00ef")]
     if cmd == "off":
         return [pack(0x11, 0)]
     if cmd == "attention":
         return [pack(0x11, 1), pack(0x12, 0x18, 0xFF), pack(0x16, 100)]  # scene Red Strobe, speed 100
+    if cmd == "done":
+        # ponytail: user asked for 1000 blinks in 5 s (200 Hz); BLE writes take ~50 ms and the firmware strobe
+        # tops out well below that, so this is the fastest green blink the strip can do
+        return [pack(0x11, 1), pack(0x12, 0x19, 0xFF), pack(0x16, 100)]  # scene Green Strobe, speed 100
     r, g, b = bytes.fromhex(rgb)
     return [pack(0x11, 1), pack(0x12, 1, 0), pack(0x15, r, g, b, 0xFF)]
 
@@ -180,7 +186,7 @@ def main(argv):
             send(st["name"], "attention", None)
             st["mode"] = "attention"
         elif cmd == "done":
-            send(st["name"], "colour", GREEN)
+            send(st["name"], "done", None)
             st["mode"] = "done"
             save(st)
             time.sleep(GREEN_SECONDS)
@@ -201,6 +207,7 @@ if __name__ == "__main__":
         assert frames("daybetter", "attention", None)[1].hex() == "a0120518ff" + crc16_modbus(bytes.fromhex("a0120518ff")).hex()
         assert frames("elk", "colour", "ff0000")[1].hex() == "7e000503ff000000ef"
         assert frames("elk", "attention", None)[1].hex() == "7e00039603000000ef"
+        assert frames("daybetter", "done", None)[1].hex() == "a0120519ff" + crc16_modbus(bytes.fromhex("a0120519ff")).hex()
         print("selftest ok")
     else:
         main(sys.argv)

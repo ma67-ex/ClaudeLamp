@@ -8,7 +8,7 @@ A Bluetooth Low Energy (BLE) LED strip in the user's room should:
 
 1. show the idle colour (purple) while Claude Code works,
 2. strobe red at maximum speed when Claude asks a question (the `AskUserQuestion` tool, or a final message ending in "?") or waits for a permission prompt,
-3. turn green for 5 seconds when Claude finishes a turn, then return to idle,
+3. strobe green at maximum speed for 5 seconds when Claude finishes a turn, then return to idle,
 4. return to idle when the user sends the next message or grants a permission.
 
 ## 2. Hardware and environment
@@ -149,7 +149,7 @@ Add to `~/.claude/settings.json` under `"hooks"` (the installer merges `hooks.js
 | `UserPromptSubmit` | none | `led.py working` | user replied |
 | `PostToolUse` | none | `led.py unattention` | a tool ran after an attention state, meaning the permission was granted; back to idle. No-op otherwise. |
 
-Attention = DayBetter scene `0x18` (Red Strobe) with speed 100, or ELK effect `0x96` (blink red) with speed 100. Done = static green, `sleep 5`, idle colour; the script holds the file lock during the 5 s so a `working` hook that fires meanwhile runs afterwards.
+Attention = DayBetter scene `0x18` (Red Strobe) with speed 100, or ELK effect `0x96` (blink red) with speed 100. Done = scene `0x19` (Green Strobe) at speed 100, `sleep 5`, idle colour; the script holds the file lock during the 5 s so a `working` hook that fires meanwhile runs afterwards.
 
 ## 5b. The desktop app: `app.py` + `daybetter.py`
 

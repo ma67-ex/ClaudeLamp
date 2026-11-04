@@ -4,7 +4,7 @@ Turn a cheap Bluetooth LED strip into a status light for Claude Code.
 
 - Claude is working: strip shows your idle colour (purple by default)
 - Claude asks a question or needs a permission: strip **strobes red** at full speed
-- Claude finishes a turn: strip turns **green for 5 seconds**, then back to idle
+- Claude finishes a turn: strip **strobes green** at full speed for 5 seconds, then back to idle
 - You reply, or you grant the permission: back to idle
 
 Tested on macOS with a DayBetter strip (BLE name `P065_17f3`). Also speaks the ELK-BLEDOM / MELK protocol used by most generic "Bluetooth LED strip" controllers.
@@ -67,7 +67,7 @@ Claude Code hooks in `~/.claude/settings.json` run `led.py` in the background on
 |---|---|---|
 | `PreToolUse` | `AskUserQuestion` | red strobe |
 | `Notification` | `permission_prompt` | red strobe |
-| `Stop` | | green 5 s, then idle. If Claude's last message ends with "?", red strobe instead |
+| `Stop` | | green strobe 5 s, then idle. If Claude's last message ends with "?", red strobe instead |
 | `UserPromptSubmit` | | idle |
 | `PostToolUse` | any tool | idle, only if currently strobing (permission was granted) |
 
