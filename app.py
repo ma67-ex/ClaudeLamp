@@ -55,6 +55,7 @@ class Api:
         """led.py sends {"frames": [hex, ...]} as one line; we write them on our connection and answer {"ok": true}."""
         try:
             req = json.loads((await reader.readline()).decode())
+            self._stop_chaos()  # a status change from Claude beats the party
             await (await self._strip()).send([bytes.fromhex(h) for h in req["frames"]])
             writer.write((json.dumps({"ok": True}) + "\n").encode())
         except Exception as e:
@@ -115,6 +116,34 @@ class Api:
 
     def speed(self, pct):
         return self._run(self._send(db.speed(int(pct))))
+
+    def disco(self):
+        """Ultimate disco: firmware seven-colour strobe at full speed and brightness. Fastest the strip can do on its own."""
+        self._stop_chaos()
+        return self._run(self._send([db.switch(True), db.brightness(100), db.scene(0x17), db.speed(100)]))
+
+    def chaos(self, on):
+        """Host-driven disco: random colour every BLE write (about 15 per second)."""
+        if on:
+            self._stop_chaos()
+            self._chaos = asyncio.run_coroutine_threadsafe(self._chaos_loop(), self.loop)
+            return {"ok": True}
+        self._stop_chaos()
+        return {"ok": True}
+
+    def _stop_chaos(self):
+        task = getattr(self, "_chaos", None)
+        if task and not task.done():
+            task.cancel()
+        self._chaos = None
+
+    async def _chaos_loop(self):
+        import random
+        strip = await self._strip()
+        await strip.send([db.switch(True), db.brightness(100)] + db.color(255, 0, 0))
+        while True:
+            r, g, b = random.choice([(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (0, 255, 255), (255, 0, 255), (255, 255, 255)])
+            await strip.send(db.pack(db.CMD_COLOR, r, g, b, 255))  # ponytail: one write per colour, ~60 ms each on this radio
 
     # DIY
     def diy(self, colors, pattern, bright, spd):
@@ -199,6 +228,8 @@ button.b:hover{border-color:var(--acc)}button.b.on{background:var(--acc);border-
  <div class="err" id="e-light"></div>
 </section>
 <section id="scenes">
+ <div class="card"><div class="row"><label>Party</label><button class="b on" onclick="disco()">Ultimate Disco</button><button id="chaosb" class="b" onclick="chaos()">Chaos (random colours, host-driven)</button></div>
+ <p class="hint">Ultimate Disco = firmware seven-colour strobe at max speed. Chaos streams a new random colour on every Bluetooth write, about 15 per second; stop it before using other controls.</p></div>
  <div class="card"><div class="row"><label>Speed</label><input id="speed" type="range" min="1" max="100" value="50"><span id="speedv">50%</span></div>
  <div class="row"><label>Brightness</label><input id="bright2" type="range" min="1" max="100" value="100"><span id="bright2v">100%</span></div></div>
  <div class="card"><div class="grid" id="scenegrid"></div></div><div class="err" id="e-scenes"></div>
@@ -254,6 +285,9 @@ $('#col').oninput=e=>{$('#colv').textContent=e.target.value;sendColor(e.target.v
 SWATCH.forEach(c=>{const s=document.createElement('span');s.style.background=c;s.onclick=()=>{$('#col').value=c;$('#colv').textContent=c;sendColor(c);};$('#sw').appendChild(s);});
 const sendWarm=throttle(v=>call('e-light',()=>api().white(v)),150);$('#warm').oninput=e=>sendWarm(e.target.value);
 const sendSpeed=throttle(v=>call('e-scenes',()=>api().speed(v)),150);$('#speed').oninput=e=>{$('#speedv').textContent=e.target.value+'%';sendSpeed(e.target.value);};
+let chaosOn=false;
+function disco(){chaosOn=false;$('#chaosb').classList.remove('on');setPower(true);$('#speed').value=100;$('#speedv').textContent='100%';document.querySelectorAll('#scenegrid .b').forEach(b=>b.classList.remove('on'));call('e-scenes',()=>api().disco());}
+function chaos(){chaosOn=!chaosOn;$('#chaosb').classList.toggle('on',chaosOn);setPower(true);call('e-scenes',()=>api().chaos(chaosOn));}
 function buildScenes(list){const g=$('#scenegrid');g.innerHTML='';list.forEach(s=>{const b=document.createElement('button');b.className='b';b.textContent=s.name+(s.animated?'':' ·');b.onclick=()=>{document.querySelectorAll('#scenegrid .b').forEach(x=>x.classList.remove('on'));b.classList.add('on');setPower(true);call('e-scenes',()=>api().scene(s.id));};g.appendChild(b);});}
 document.querySelectorAll('#diy [data-p]').forEach(b=>b.onclick=()=>{document.querySelectorAll('#diy [data-p]').forEach(x=>x.classList.remove('on'));b.classList.add('on');pattern=+b.dataset.p;});
 function renderSlots(){const h=$('#slots');h.innerHTML='';slots.forEach((c,i)=>{const d=document.createElement('div');d.className='slot';if(typeof c==='string'){const inp=document.createElement('input');inp.type='color';inp.value=c;inp.oninput=e=>slots[i]=e.target.value;d.appendChild(inp);}else{const inp=document.createElement('input');inp.type='range';inp.min=0;inp.max=255;inp.value=c;inp.style.width='90px';inp.title='white warmth';inp.oninput=e=>slots[i]=+e.target.value;d.appendChild(inp);}const x=document.createElement('b');x.textContent='×';x.onclick=()=>{slots.splice(i,1);renderSlots();};d.appendChild(x);h.appendChild(d);});}
